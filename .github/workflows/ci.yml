@@ -33,7 +33,7 @@ jobs:
       with:
         apps: scala-cli
     - name: Publish
-      run: scala-cli --power publish presentation-compiler/src/main
+      run: scala-cli --power publish presentation-compiler/src/main --doc=false
       env:
         PUBLISH_USER: ${{ secrets.PUBLISH_USER }}
         PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
