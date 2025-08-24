@@ -8,6 +8,7 @@ import mill.scalalib.*
 import mill.util.VcsVersion
 
 object `presentation-compiler` extends SbtModule with PublishModule {
+  def sources = Task.Sources(os.sub / "src/main")
   def scalaVersion = "3.7.0"
   def mvnDeps = Seq(
     mvn"org.lz4:lz4-java:1.8.0",
