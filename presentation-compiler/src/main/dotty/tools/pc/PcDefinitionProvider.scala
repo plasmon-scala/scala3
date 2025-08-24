@@ -5,6 +5,7 @@ import java.nio.file.Paths
 import java.util.ArrayList
 
 import scala.jdk.CollectionConverters.*
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.pc.DefinitionResultImpl
 import scala.meta.pc.DefinitionResult
 import scala.meta.pc.OffsetParams
@@ -31,13 +32,13 @@ class PcDefinitionProvider(
     search: SymbolSearch
 ):
 
-  def definitions(): DefinitionResult =
-    definitions(findTypeDef = false)
+  def definitions(module: GlobalSymbolIndex.Module): DefinitionResult =
+    definitions(module, findTypeDef = false)
 
-  def typeDefinitions(): DefinitionResult =
-    definitions(findTypeDef = true)
+  def typeDefinitions(module: GlobalSymbolIndex.Module): DefinitionResult =
+    definitions(module, findTypeDef = true)
 
-  private def definitions(findTypeDef: Boolean): DefinitionResult =
+  private def definitions(module: GlobalSymbolIndex.Module, findTypeDef: Boolean): DefinitionResult =
     val uri = params.uri().nn
     val text = params.text().nn
     val filePath = Paths.get(uri)
@@ -53,10 +54,10 @@ class PcDefinitionProvider(
     given ctx: Context = driver.localContext(params)
     val indexedContext = IndexedContext(ctx)
     val result =
-      if findTypeDef then findTypeDefinitions(path, pos, indexedContext, uri)
-      else findDefinitions(path, pos, indexedContext, uri)
+      if findTypeDef then findTypeDefinitions(module, path, pos, indexedContext, uri)
+      else findDefinitions(module, path, pos, indexedContext, uri)
 
-    if result.locations().nn.isEmpty() then fallbackToUntyped(pos, uri)(using ctx)
+    if result.locations().nn.isEmpty() then fallbackToUntyped(module, pos, uri)(using ctx)
     else result
   end definitions
 
@@ -72,17 +73,18 @@ class PcDefinitionProvider(
    * @param pos cursor position
    * @return definition result
    */
-  private def fallbackToUntyped(pos: SourcePosition, uri: URI)(
+  private def fallbackToUntyped(module: GlobalSymbolIndex.Module, pos: SourcePosition, uri: URI)(
     using ctx: Context
   ) =
     lazy val untpdPath = NavigateAST
       .untypedPath(pos.span)
       .collect { case t: untpd.Tree => t }
 
-    definitionsForSymbol(untpdPath.headOption.map(_.symbol).toList, uri, pos)
+    definitionsForSymbol(module, untpdPath.headOption.map(_.symbol).toList, uri, pos)
   end fallbackToUntyped
 
   private def findDefinitions(
+      module: GlobalSymbolIndex.Module,
       path: List[Tree],
       pos: SourcePosition,
       indexed: IndexedContext,
@@ -90,6 +92,7 @@ class PcDefinitionProvider(
   ): DefinitionResult =
     import indexed.ctx
     definitionsForSymbol(
+      module,
       MetalsInteractive.enclosingSymbols(path, pos, indexed),
       uri,
       pos
@@ -97,6 +100,7 @@ class PcDefinitionProvider(
   end findDefinitions
 
   private def findTypeDefinitions(
+      module: GlobalSymbolIndex.Module,
       path: List[Tree],
       pos: SourcePosition,
       indexed: IndexedContext,
@@ -113,14 +117,15 @@ class PcDefinitionProvider(
       case Nil =>
         path.headOption match
           case Some(value: Literal) =>
-            definitionsForSymbol(List(value.typeOpt.widen.typeSymbol), uri, pos)
+            definitionsForSymbol(module, List(value.typeOpt.widen.typeSymbol), uri, pos)
           case _ => DefinitionResultImpl.empty
       case _ =>
-        definitionsForSymbol(typeSymbols, uri, pos)
+        definitionsForSymbol(module, typeSymbols, uri, pos)
 
   end findTypeDefinitions
 
   private def definitionsForSymbol(
+      module: GlobalSymbolIndex.Module,
       symbols: List[Symbol],
       uri: URI,
       pos: SourcePosition
@@ -150,7 +155,7 @@ class PcDefinitionProvider(
           val res = new ArrayList[Location]()
           semanticSymbolsSorted(symbols)
             .foreach { sym =>
-              res.addAll(search.definition(sym, params.uri()))
+              res.addAll(search.definition(module.asString, sym, params.uri()))
             }
           DefinitionResultImpl(
             SemanticdbSymbols.symbolName(sym),
