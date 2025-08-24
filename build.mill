@@ -1,0 +1,100 @@
+//| mill-version: 1.3.1
+//| bspScriptIgnore:
+//| - "bench/"
+//| - "bench-micro/"
+//| - "bench-run/"
+//| - "bin/"
+//| - "changelogs/"
+//| - "community-build/"
+//| - "compiler/"
+//| - "dist/"
+//| - "docs/"
+//| - "interfaces/"
+//| - "language-server/"
+//| - "library/"
+//| - "library-aux/"
+//| - "library-js/"
+//| - "pkgs/"
+//| - "presentation-compiler-testcases/"
+//| - "project/"
+//| - "repl/"
+//| - "sandbox/"
+//| - "sbt-bridge/"
+//| - "sbt-test/"
+//| - "scaladoc/"
+//| - "scaladoc-js/"
+//| - "scaladoc-testcases/"
+//| - "sjs-compiler-tests/"
+//| - "staging/"
+//| - "tasty/"
+//| - "tasty-inspector/"
+//| - "tests/"
+
+package build
+
+import mill.*
+import mill.api.BuildCtx
+import mill.javalib.publish.*
+import mill.scalalib.*
+import mill.util.Jvm
+
+object `presentation-compiler` extends SbtModule with PublishModule {
+  def sources = Task.Sources(os.sub / "src/main")
+  def scalaVersion = "3.10.0"
+  private def mtagsVersion = "1.6.10-20261030.161018-1"
+  def repositories = super.repositories() ++ Seq("central:maven-snapshots")
+  def mvnDeps = Seq(
+    mvn"com.lihaoyi::pprint:0.8.1",
+    mvn"org.lz4:lz4-java:1.8.0",
+    mvn"io.get-coursier:interface:1.0.18",
+    mvn"io.github.plasmon-scala:mtags-interfaces:$mtagsVersion"
+      .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j"))
+      .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j.jsonrpc")),
+    mvn"io.github.plasmon-scala:mtags_2.13.18:$mtagsVersion"
+      .exclude(("com.lihaoyi", "pprint_2.13")),
+    mvn"io.github.plasmon-scala:mtags-shared_2.13.18:$mtagsVersion"
+      .exclude(("com.lihaoyi", "pprint_2.13")),
+    mvn"org.eclipse.lsp4j:org.eclipse.lsp4j:1.0.0",
+    mvn"org.scala-lang:scala3-compiler_3:${scalaVersion()}"
+  )
+  def scalacOptions = super.scalacOptions() ++ Seq(
+    "-source", "3.3", "-Yexplicit-nulls", "-Wsafe-init"
+  )
+
+  def artifactName = "scala3-presentation-compiler"
+  // The version after 'v' if HEAD has a 'v*' tag, else the version following the latest 'v*' tag
+  // (3.8.4-1 -> 3.8.5-SNAPSHOT)
+  def publishVersion = Task.Input {
+    def describe(args: String*) =
+      os.proc("git", "describe", "--tags", "--match", "v*", args)
+        .call(cwd = BuildCtx.workspaceRoot, stderr = os.Pipe, check = false)
+    val exactMatch = describe("--exact-match", "HEAD")
+    if (exactMatch.exitCode == 0) exactMatch.out.trim().stripPrefix("v")
+    else {
+      val latest = describe("--abbrev=0", "HEAD")
+      if (latest.exitCode != 0)
+        Task.fail(s"No 'v*' tag found: ${latest.err.trim()}")
+      val latestVersion = latest.out.trim().stripPrefix("v")
+      latestVersion.split('.').take(3) match {
+        case Array(major, minor, patch) if patch.head.isDigit =>
+          s"$major.$minor.${patch.takeWhile(_.isDigit).toInt + 1}-SNAPSHOT"
+        case _ =>
+          Task.fail(s"Cannot compute the version following $latestVersion")
+      }
+    }
+  }
+  // Maven Central requires a javadoc JAR, but nobody reads it, and scaladoc is slow
+  def docJar = Task {
+    PathRef(Jvm.createJar(Task.dest / "empty-javadoc.jar", Nil))
+  }
+  def pomSettings = PomSettings(
+    description = "scala3-presentation-compiler",
+    organization = "io.github.plasmon-scala",
+    url = s"https://github.com/plasmon-scala/scala3",
+    licenses = Seq(License.`Apache-2.0`),
+    versionControl = VersionControl.github("plasmon-scala", "scala3"),
+    developers = Seq(
+      Developer("alexarchambault", "Alex Archambault", "https://github.com/alexarchambault"),
+    )
+  )
+}
