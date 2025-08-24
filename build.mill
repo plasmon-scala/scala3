@@ -1,0 +1,38 @@
+//| mill-version: 1.0.3
+
+package build
+
+import mill.*
+import mill.javalib.publish.*
+import mill.scalalib.*
+import mill.util.VcsVersion
+
+object `presentation-compiler` extends SbtModule with PublishModule {
+  def scalaVersion = "3.7.0"
+  def mvnDeps = Seq(
+    mvn"org.lz4:lz4-java:1.8.0",
+    mvn"io.get-coursier:interface:1.0.18",
+    mvn"io.github.plasmon-scala:mtags-interfaces:1.6.1"
+      .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j"))
+      .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j.jsonrpc")),
+    mvn"io.github.plasmon-scala:mtags_2.13.16:1.6.1",
+    mvn"org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1",
+    mvn"org.scala-lang:scala3-compiler_3:3.7.0"
+  )
+  def scalacOptions = super.scalacOptions() ++ Seq(
+    "-source", "3.3", "-Yexplicit-nulls", "-Wsafe-init"
+  )
+
+  def artifactName = "scala3-presentation-compiler"
+  def publishVersion = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
+  def pomSettings = PomSettings(
+    description = "scala3-presentation-compiler",
+    organization = "io.github.plasmon-scala",
+    url = s"https://github.com/plasmon-scala/scala3",
+    licenses = Seq(License.`Apache-2.0`),
+    versionControl = VersionControl.github("plasmon-scala", "scala3"),
+    developers = Seq(
+      Developer("alexarchambault", "Alex Archambault", "https://github.com/alexarchambault"),
+    )
+  )
+}

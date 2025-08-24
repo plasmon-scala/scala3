@@ -15,11 +15,9 @@ jobs:
       with:
         fetch-depth: 0
     - uses: coursier/cache-action@v6.4
-    - uses: VirtusLab/scala-cli-setup@v1.0
-      with:
-        power: true
+    - uses: coursier/setup-action@v1
     - name: Test
-      run: scala-cli compile presentation-compiler/src/main
+      run: ./mill -i __.compile
 
   publish:
     if: github.event_name == 'push'
@@ -30,12 +28,10 @@ jobs:
         fetch-depth: 0
     - uses: coursier/cache-action@v6
     - uses: coursier/setup-action@v1
-      with:
-        apps: scala-cli
     - name: Publish
-      run: scala-cli --power publish presentation-compiler/src/main --doc=false
+      run: ./mill -i mill.scalalib.SonatypeCentralPublishModule/
       env:
-        PUBLISH_USER: ${{ secrets.PUBLISH_USER }}
-        PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
-        PUBLISH_SECRET_KEY: ${{ secrets.PUBLISH_SECRET_KEY }}
-        PUBLISH_SECRET_KEY_PASSWORD: ${{ secrets.PUBLISH_SECRET_KEY_PASSWORD }}
+        MILL_PGP_SECRET_BASE64: ${{ secrets.PUBLISH_SECRET_KEY_BASE64 }}
+        MILL_PGP_PASSPHRASE: ${{ secrets.PUBLISH_SECRET_KEY_PASSWORD }}
+        MILL_SONATYPE_USERNAME: ${{ secrets.PUBLISH_USER }}
+        MILL_SONATYPE_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
