@@ -1,4 +1,4 @@
-//| mill-version: 1.0.3
+//| mill-version: 1.0.5
 
 package build
 
@@ -9,7 +9,7 @@ import mill.util.VcsVersion
 
 object `presentation-compiler` extends SbtModule with PublishModule {
   def sources = Task.Sources(os.sub / "src/main")
-  def scalaVersion = "3.7.0"
+  def scalaVersion = "3.7.1"
   def mvnDeps = Seq(
     mvn"org.lz4:lz4-java:1.8.0",
     mvn"io.get-coursier:interface:1.0.18",
@@ -18,7 +18,7 @@ object `presentation-compiler` extends SbtModule with PublishModule {
       .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j.jsonrpc")),
     mvn"io.github.plasmon-scala:mtags_2.13.16:1.6.1",
     mvn"org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1",
-    mvn"org.scala-lang:scala3-compiler_3:3.7.0"
+    mvn"org.scala-lang:scala3-compiler_3:${scalaVersion()}"
   )
   def scalacOptions = super.scalacOptions() ++ Seq(
     "-source", "3.3", "-Yexplicit-nulls", "-Wsafe-init"
