@@ -5,7 +5,6 @@ import java.nio.file.Paths
 
 import scala.annotation.tailrec
 
-import scala.meta.pc.reports.ReportContext
 import dotty.tools.pc.utils.InteractiveEnrichments.*
 import dotty.tools.pc.printer.ShortenedTypePrinter
 import scala.meta.internal.pc.InlayHints
@@ -13,6 +12,7 @@ import scala.meta.internal.pc.LabelPart
 import scala.meta.internal.pc.LabelPart.*
 import scala.meta.pc.InlayHintsParams
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 
 import dotty.tools.dotc.ast.tpd.*
 import dotty.tools.dotc.core.Contexts.Context
