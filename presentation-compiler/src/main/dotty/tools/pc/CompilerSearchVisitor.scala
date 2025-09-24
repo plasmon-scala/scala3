@@ -4,8 +4,8 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 import scala.meta.internal.metals.Report
-import scala.meta.internal.metals.ReportContext
 import scala.meta.pc.*
+import scala.meta.pc.reports.ReportContext
 import scala.util.control.NonFatal
 
 import dotty.tools.dotc.core.Contexts.*
@@ -34,7 +34,7 @@ class CompilerSearchVisitor(
       logger.log(Level.WARNING, err.getMessage())
       false
     case NonFatal(e) =>
-      reports.incognito.create(
+      reports.incognito.create(() =>
         Report(
           "is_public",
           s"""Symbol: $sym""".stripMargin,
@@ -68,7 +68,7 @@ class CompilerSearchVisitor(
     loop(List(pkgSym), parts)
   end toSymbols
 
-  def visitClassfile(pkgPath: String, filename: String): Int =
+  def visitClassfile(pkgPath: String, filename: String, ctx: SourcePathContext): Int =
     val pkg = normalizePackage(pkgPath)
 
     val innerPath = filename

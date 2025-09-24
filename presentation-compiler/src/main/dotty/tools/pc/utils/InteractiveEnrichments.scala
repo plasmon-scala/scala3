@@ -5,6 +5,7 @@ import java.util.Optional
 import scala.annotation.tailrec
 import scala.meta.internal.jdk.CollectionConverters.*
 import scala.meta.internal.mtags.CommonMtagsEnrichments
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.mtags.KeywordWrapper
 import scala.meta.pc.ContentType
 import scala.meta.pc.OffsetParams
@@ -260,7 +261,7 @@ object InteractiveEnrichments extends CommonMtagsEnrichments:
     }
 
   extension (search: SymbolSearch)
-    def symbolDocumentation(symbol: Symbol, contentType: ContentType = ContentType.MARKDOWN)(using
+    def symbolDocumentation(module: GlobalSymbolIndex.Module, symbol: Symbol, contentType: ContentType = ContentType.MARKDOWN)(using
         Context
     ): Option[SymbolDocumentation] =
       def toSemanticdbSymbol(symbol: Symbol) =
@@ -281,9 +282,11 @@ object InteractiveEnrichments extends CommonMtagsEnrichments:
         if symbol.isLocal then Optional.empty
         else
           search.documentation(
+            module.asString,
             sym,
             () => parentSymbols.iterator.map(toSemanticdbSymbol).toList.asJava,
             contentType,
+            null // meh
           )
       documentation.nn.toScala
     end symbolDocumentation
