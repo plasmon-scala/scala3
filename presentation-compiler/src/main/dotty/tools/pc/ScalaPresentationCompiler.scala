@@ -509,7 +509,16 @@ class ScalaPresentationCompiler(
   def compile(
       params: VirtualFileParams
   ): CompletableFuture[CompileResult] =
-    ???
+    compilerAccess.withNonInterruptableCompiler(
+      CompileProvider.Result(Nil, ""),
+      params.token(),
+      "compile",
+      params.uri.toASCIIString
+    ) { access =>
+      val driver = access.compiler()
+      CompileProvider.compile(params, driver)
+    }(params.toQueryContext)
+  end compile
 
   def hover(
       params: OffsetParams
