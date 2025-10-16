@@ -42,6 +42,7 @@ import org.eclipse.lsp4j.DocumentHighlight
 import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j as l
 import scala.meta.internal.pc.HasCompilerAccess
+import dotty.tools.dotc.config.Properties
 
 
 class ScalaPresentationCompiler(
@@ -144,7 +145,19 @@ class ScalaPresentationCompiler(
       userLogger
     )(using ec)
 
-  def newDriver: InteractiveDriver = CachingDriver(driverSettings, javaHome)
+  def newDriver: InteractiveDriver = {
+    userLogger.accept(s"Creating new Scala Presentation Compiler for ${Properties.versionString}")
+    userLogger.accept("Settings:")
+    for (elem <- driverSettings)
+      userLogger.accept(s"  $elem")
+    userLogger.accept("")
+    userLogger.accept(s"Java home: $javaHome")
+    userLogger.accept("Class path:")
+    for (elem <- classpath)
+      userLogger.accept(s"  $elem")
+    userLogger.accept("")
+    CachingDriver(driverSettings, javaHome)
+  }
 
   def driverSettings =
     val implicitSuggestionTimeout = List("-Ximport-suggestion-timeout", "0")
@@ -315,6 +328,7 @@ class ScalaPresentationCompiler(
       code: String
   ): CompletableFuture[Array[Byte]] =
     val virtualFile = CompilerVirtualFileParams(filename, code)
+    userLogger.accept(s"Computing semanticdb for $filename")
     compilerAccess.withNonInterruptableCompiler(
       Array.empty[Byte],
       EmptyCancelToken,
