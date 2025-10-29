@@ -271,6 +271,7 @@ object InteractiveEnrichments extends CommonMtagsEnrichments:
           else symbol
         )
       val sym = toSemanticdbSymbol(symbol)
+      def symCompanion = toSemanticdbSymbol(symbol.companion)
       def parentSymbols =
         if symbol.name == nme.apply && symbol.maybeOwner.is(ModuleClass) then
           List(
@@ -280,14 +281,27 @@ object InteractiveEnrichments extends CommonMtagsEnrichments:
         else symbol.allOverriddenSymbols
       val documentation =
         if symbol.isLocal then Optional.empty
-        else
-          search.documentation(
+        else {
+          var maybeDoc = search.documentation(
             module.asString,
             sym,
             () => parentSymbols.iterator.map(toSemanticdbSymbol).toList.asJava,
             contentType,
             null // meh
           )
+          if (!maybeDoc.isPresent() || maybeDoc.get().docstring().isEmpty()) {
+            val maybeCompanionDoc = search.documentation(
+              module.asString,
+              symCompanion,
+              () => parentSymbols.iterator.map(toSemanticdbSymbol).toList.asJava,
+              contentType,
+              null // meh
+            )
+            if (maybeCompanionDoc.isPresent() && maybeCompanionDoc.get().docstring().nonEmpty)
+              maybeDoc = maybeCompanionDoc
+          }
+          maybeDoc
+        }
       documentation.nn.toScala
     end symbolDocumentation
   end extension
