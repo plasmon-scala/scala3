@@ -25,7 +25,12 @@ object `presentation-compiler` extends SbtModule with PublishModule {
   )
 
   def artifactName = "scala3-presentation-compiler"
-  def publishVersion = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
+  def publishVersion = Task {
+    val ver = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
+    val dirtyIdx = ver.indexOf("-DIRTY")
+    if (dirtyIdx < 0) ver
+    else ver.take(dirtyIdx) + "-SNAPSHOT"
+  }
   def pomSettings = PomSettings(
     description = "scala3-presentation-compiler",
     organization = "io.github.plasmon-scala",
