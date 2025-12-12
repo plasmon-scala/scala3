@@ -1,5 +1,6 @@
 package dotty.tools.pc
 
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.pc.ItemResolver
 import scala.meta.pc.PresentationCompilerConfig
 import scala.meta.pc.SymbolDocumentation
@@ -18,6 +19,7 @@ object CompletionItemResolver extends ItemResolver:
   override def adjustIndexOfJavaParams = 0
 
   def resolve(
+      module: GlobalSymbolIndex.Module,
       item: CompletionItem,
       msym: String,
       search: SymbolSearch,
@@ -26,16 +28,16 @@ object CompletionItemResolver extends ItemResolver:
     SemanticdbSymbols.inverseSemanticdbSymbol(msym) match
       case gsym :: _ if gsym != NoSymbol =>
         search
-          .symbolDocumentation(gsym)
+          .symbolDocumentation(module, gsym)
           .orElse(
-            search.symbolDocumentation(gsym.companion)
+            search.symbolDocumentation(module, gsym.companion)
           ) match
           case Some(info) if item.getDetail() != null =>
             enrichDocs(
               item,
               info,
               metalsConfig,
-              fullDocstring(gsym, search),
+              fullDocstring(module, gsym, search),
               gsym.is(JavaDefined)
             )
           case _ =>
@@ -46,11 +48,11 @@ object CompletionItemResolver extends ItemResolver:
     end match
   end resolve
 
-  private def fullDocstring(gsym: Symbol, search: SymbolSearch)(using
+  private def fullDocstring(module: GlobalSymbolIndex.Module, gsym: Symbol, search: SymbolSearch)(using
       Context
   ): String =
     def docs(gsym: Symbol): String =
-      search.symbolDocumentation(gsym).fold("")(_.docstring().nn)
+      search.symbolDocumentation(module, gsym).fold("")(_.docstring().nn)
     val gsymDoc = docs(gsym)
     def keyword(gsym: Symbol): String =
       if gsym.isClass then "class"
@@ -62,15 +64,15 @@ object CompletionItemResolver extends ItemResolver:
     if companion == NoSymbol || gsym.is(JavaDefined) then
       if gsymDoc.isEmpty() then
         if gsym.isAliasType then
-          fullDocstring(gsym.info.deepDealiasAndSimplify.typeSymbol, search)
+          fullDocstring(module, gsym.info.deepDealiasAndSimplify.typeSymbol, search)
         else if gsym.is(Method) then
           gsym.info.finalResultType match
             case tr @ TermRef(_, sym) =>
-              fullDocstring(tr.symbol, search)
+              fullDocstring(module, tr.symbol, search)
             case _ =>
               ""
         else if gsym.isTerm && gsym.info.typeSymbol.is(Module) then
-          fullDocstring(gsym.info.typeSymbol.companion, search)
+          fullDocstring(module, gsym.info.typeSymbol.companion, search)
         else ""
       else gsymDoc
     else
