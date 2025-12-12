@@ -4,10 +4,12 @@ package completions
 import java.nio.file.Path
 
 import scala.jdk.CollectionConverters._
-import scala.meta.pc.reports.ReportContext
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompilerConfig
+import scala.meta.pc.SourcePathContext
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 
 import dotty.tools.dotc.ast.tpd
 import dotty.tools.dotc.ast.tpd.*
@@ -50,11 +52,11 @@ class CompletionProvider(
     freshDriver: () => InteractiveDriver,
     params: OffsetParams,
     config: PresentationCompilerConfig,
-    buildTargetIdentifier: String,
+    moduleString: String,
     folderPath: Option[Path],
     referenceCounter: CompletionItemPriority
 )(using reports: ReportContext):
-  def completions(): CompletionList =
+  def completions(module: GlobalSymbolIndex.Module)(using SourcePathContext): CompletionList =
     val uri = params.uri().nn
     val text = params.text().nn
 
@@ -125,7 +127,7 @@ class CompletionProvider(
             text,
             locatedCtx,
             search,
-            buildTargetIdentifier,
+            moduleString,
             completionPos,
             indexedCtx,
             tpdPath,
@@ -136,10 +138,11 @@ class CompletionProvider(
             unit.comments,
             driver.settings,
             referenceCounter
-          ).completions()
+          ).completions(module)
 
         val items = completions.zipWithIndex.map { case (item, idx) =>
           completionItems(
+            module,
             item,
             idx,
             autoImportsGen,
@@ -200,6 +203,7 @@ class CompletionProvider(
   end applyCompletionCursor
 
   private def completionItems(
+      module: GlobalSymbolIndex.Module,
       completion: CompletionValue,
       idx: Int,
       autoImports: AutoImportsGenerator,
@@ -218,9 +222,9 @@ class CompletionProvider(
     // to recalculate the description
     // related issue https://github.com/lampepfl/scala3/issues/11941
     lazy val kind: CompletionItemKind = underlyingCompletion.completionItemKind
-    val description = underlyingCompletion.description(printer)
+    val description = underlyingCompletion.description(module.asString, printer)
     val label =
-      if config.isDetailIncludedInLabel then completion.labelWithDescription(printer)
+      if config.isDetailIncludedInLabel then completion.labelWithDescription(module.asString, printer)
       else completion.label
     val ident = underlyingCompletion.insertText.getOrElse(underlyingCompletion.label)
     lazy val isInStringInterpolation =
@@ -268,7 +272,7 @@ class CompletionProvider(
       item.setAdditionalTextEdits((underlyingCompletion.additionalEdits ++ additionalEdits).asJava)
       underlyingCompletion.insertMode.foreach(item.setInsertTextMode)
 
-      val data = underlyingCompletion.completionData(buildTargetIdentifier)
+      val data = underlyingCompletion.completionData(moduleString)
       item.setData(data.toJson)
 
       item.setTags(underlyingCompletion.lspTags.asJava)

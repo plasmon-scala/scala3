@@ -1,11 +1,12 @@
 package dotty.tools.pc.completions
 
 import scala.collection.mutable.ListBuffer
-import scala.meta.pc.reports.ReportContext
 import scala.meta.internal.pc.CompletionFuzzy
 import scala.meta.internal.pc.InterpolationSplice
 import scala.meta.pc.PresentationCompilerConfig
+import scala.meta.pc.SourcePathContext
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 
 import dotty.tools.dotc.ast.tpd.*
 import dotty.tools.dotc.core.Contexts.Context
@@ -32,7 +33,7 @@ object InterpolatorCompletions:
       search: SymbolSearch,
       config: PresentationCompilerConfig,
       buildTargetIdentifier: String
-  )(using Context, ReportContext) =
+  )(using Context, ReportContext, SourcePathContext) =
     InterpolationSplice(completionPos.queryEnd, text.toCharArray().nn, text) match
       case Some(interpolator) =>
         InterpolatorCompletions.contributeScope(
@@ -222,7 +223,7 @@ object InterpolatorCompletions:
       hasStringInterpolator: Boolean,
       search: SymbolSearch,
       buildTargetIdentifier: String
-  )(using ctx: Context, reportsContext: ReportContext): List[CompletionValue] =
+  )(using ctx: Context, reportsContext: ReportContext, sourcePathCtx: SourcePathContext): List[CompletionValue] =
     val litStartPos = lit.span.start
     val litEndPos = lit.span.end - (if completionPos.withCURSOR then Cursor.value.length else 0)
     val position = completionPos.originalCursorPosition
@@ -274,7 +275,7 @@ object InterpolatorCompletions:
           true,
     )
     if interpolator.name.nonEmpty then
-      search.search(interpolator.name, buildTargetIdentifier, visitor)
+      search.search(interpolator.name, buildTargetIdentifier, visitor, implicitly[SourcePathContext])
 
     def collectCompletions(
         isWorkspace: Boolean
