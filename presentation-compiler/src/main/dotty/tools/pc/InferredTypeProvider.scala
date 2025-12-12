@@ -3,10 +3,10 @@ package dotty.tools.pc
 import java.nio.file.Paths
 
 import scala.annotation.tailrec
-import scala.meta.pc.reports.ReportContext
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompilerConfig
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 import scala.meta as m
 
 import dotty.tools.dotc.ast.Trees.*

@@ -2,11 +2,11 @@ package dotty.tools.pc
 
 import java.nio.file.Paths
 
-import scala.meta.pc.reports.ReportContext
 import scala.meta.internal.pc.ExtractMethodUtils
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.RangeParams
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 import scala.meta as m
 
 import dotty.tools.dotc.ast.Trees.*

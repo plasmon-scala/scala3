@@ -2,10 +2,11 @@ package dotty.tools.pc.printer
 
 import scala.collection.mutable
 import scala.meta.internal.jdk.CollectionConverters.*
-import scala.meta.pc.reports.ReportContext
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.mtags.KeywordWrapper
 import scala.meta.pc.SymbolDocumentation
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 
 import dotty.tools.dotc.core.Contexts.Context
 import dotty.tools.dotc.core.Denotations.Denotation
@@ -217,7 +218,7 @@ class ShortenedTypePrinter(
     val dealiased = if (tpe.isNamedTupleType) tpe.deepDealiasAndSimplify else tpe
     toText(dealiased).mkString(defaultWidth, false)
 
-  def hoverSymbol(sym: Symbol, info: Type)(using Context): String =
+  def hoverSymbol(module: GlobalSymbolIndex.Module, sym: Symbol, info: Type)(using Context): String =
     val typeSymbol = info.typeSymbol
 
     def shortTypeString: String = tpe(info)
@@ -241,7 +242,7 @@ class ShortenedTypePrinter(
       case o if typeSymbol.is(Flags.Module) => // enum
         s"${keyString(o)} $name: $ownerTypeString"
       case m if m.is(Flags.Method) =>
-        defaultMethodSignature(m, info)
+        defaultMethodSignature(module, m, info)
       case _ =>
         val implicitKeyword =
           if sym.is(Flags.Implicit) then List("implicit") else Nil
@@ -258,7 +259,7 @@ class ShortenedTypePrinter(
     lazy val effectiveOwner = sym.effectiveOwner
     sym.isType && (effectiveOwner == defn.ScalaPackageClass || effectiveOwner == defn.ScalaPredefModuleClass)
 
-  def completionSymbol(denotation: Denotation): String =
+  def completionSymbol(module: GlobalSymbolIndex.Module, denotation: Denotation): String =
     val info = denotation.info.widenTermRefExpr
     val typeSymbol = info.typeSymbol
     val sym = denotation.symbol
@@ -271,7 +272,7 @@ class ShortenedTypePrinter(
     else if sym.is(Flags.Package) || sym.isClass then " " + fullNameString(sym.effectiveOwner)
     else if sym.is(Flags.Module) || typeSymbol.is(Flags.Module) then typeEffectiveOwner
     else if sym.is(Flags.Method) then
-      defaultMethodSignature(sym, info, onlyMethodParams = true)
+      defaultMethodSignature(module, sym, info, onlyMethodParams = true)
     else if sym.isType then
       info match
         case TypeAlias(t) => " = " + tpe(t.resultType)
@@ -288,6 +289,7 @@ class ShortenedTypePrinter(
    *              ": collection.mutable.Map[A, B]" for no-arg method
    */
   def defaultMethodSignature(
+      module: GlobalSymbolIndex.Module,
       gsym: Symbol,
       gtpe: Type,
       onlyMethodParams: Boolean = false,
@@ -313,7 +315,7 @@ class ShortenedTypePrinter(
       )
 
     lazy val paramsDocs =
-      symbolSearch.symbolDocumentation(gsym) match
+      symbolSearch.symbolDocumentation(module, gsym) match
         case Some(info) =>
           (info.typeParameters().nn.asScala ++ info.parameters().nn.asScala).toSeq
         case _ =>
