@@ -3,12 +3,13 @@ package dotty.tools.pc
 import java.util as ju
 
 import scala.meta.internal.metals.Report
-import scala.meta.pc.reports.ReportContext
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.pc.ScalaHover
 import scala.meta.pc.ContentType
 import scala.meta.pc.HoverSignature
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 
 import dotty.tools.dotc.ast.tpd.*
 import dotty.tools.dotc.core.Constants.*
@@ -32,10 +33,12 @@ import dotty.tools.dotc.core.StdNames
 object HoverProvider:
 
   def hover(
+      module: GlobalSymbolIndex.Module,
       params: OffsetParams,
       driver: InteractiveDriver,
       search: SymbolSearch,
-      contentType: ContentType
+      contentType: ContentType,
+      userLogger: java.util.function.Consumer[String]
   )(implicit reportContext: ReportContext): ju.Optional[HoverSignature] =
     val uri = params.uri().nn
     val text = params.text().nn
@@ -116,7 +119,7 @@ object HoverProvider:
             tpw match
               // https://github.com/scala/scala3/issues/8891
               case tpw: ImportType =>
-                printer.hoverSymbol(symbol, symbol.paramRef)
+                printer.hoverSymbol(module, symbol, symbol.paramRef)
               case _ =>
                 val (innerTpe, sym) =
                   if symbol.isType then (symbol.typeRef, symbol)
@@ -127,12 +130,12 @@ object HoverProvider:
                   else if innerTpe != NoType then innerTpe
                   else tpw
 
-                printer.hoverSymbol(sym, finalTpe.deepDealiasAndSimplify)
+                printer.hoverSymbol(module, sym, finalTpe.deepDealiasAndSimplify)
             end match
           end hoverString
 
           val docString = symbolTpes
-            .flatMap(symTpe => search.symbolDocumentation(symTpe._1, contentType))
+            .flatMap(symTpe => search.symbolDocumentation(module, symTpe._1, contentType))
             .map(_.docstring())
             .mkString("\n")
 

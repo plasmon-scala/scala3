@@ -3,9 +3,9 @@ package dotty.tools.pc
 import java.util.concurrent.ScheduledExecutorService
 
 import scala.concurrent.ExecutionContextExecutor
-import scala.meta.pc.reports.ReportContext
 import scala.meta.internal.pc.CompilerAccess
 import scala.meta.pc.PresentationCompilerConfig
+import scala.meta.pc.reports.ReportContext
 
 import dotty.tools.dotc.reporting.StoreReporter
 import dotty.tools.dotc.interactive.InteractiveDriver
@@ -13,7 +13,8 @@ import dotty.tools.dotc.interactive.InteractiveDriver
 class Scala3CompilerAccess(
     config: PresentationCompilerConfig,
     sh: Option[ScheduledExecutorService],
-    newCompiler: () => Scala3CompilerWrapper
+    newCompiler: () => Scala3CompilerWrapper,
+    userLogger: java.util.function.Consumer[String]
 )(using ec: ExecutionContextExecutor, rc: ReportContext)
     extends CompilerAccess[StoreReporter, InteractiveDriver](
       config,
@@ -22,7 +23,8 @@ class Scala3CompilerAccess(
       /* If running inside the executor, we need to reset the job queue
        * Otherwise it will block indefinetely in case of infinite loops.
        */
-      shouldResetJobQueue = true
+      shouldResetJobQueue = true,
+      userLogger
     ):
 
   def newReporter = new StoreReporter(null)
