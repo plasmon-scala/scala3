@@ -13,14 +13,16 @@ import dotty.tools.pc.utils.InteractiveEnrichments.*
 import org.eclipse.lsp4j as l
 
 import scala.jdk.CollectionConverters.*
-import scala.meta.pc.reports.ReportContext
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.SymbolDocumentation
 import scala.meta.pc.SymbolSearch
+import scala.meta.pc.reports.ReportContext
 
 object SignatureHelpProvider:
 
   def signatureHelp(
+      module: GlobalSymbolIndex.Module,
       driver: InteractiveDriver,
       params: OffsetParams,
       search: SymbolSearch
@@ -49,7 +51,7 @@ object SignatureHelpProvider:
           signature.denot.map(signature -> _)
 
         val signatureInfos = infos.map { case (signature, denot) =>
-          search.symbolDocumentation(denot.symbol) match
+          search.symbolDocumentation(module, denot.symbol) match
             case Some(doc) =>
               withDocumentation(
                 doc,
