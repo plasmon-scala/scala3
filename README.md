@@ -1,3 +1,25 @@
+# Plasmon fork of Dotty
+
+This repository builds the `presentation-compiler` module of dotty against
+Plasmon's modified mtags.
+
+Run
+```
+$ ./mill __.compile
+```
+
+to compile it.
+
+Only the `presentation-compiler` module is being built (the only module of
+interest in this fork).
+
+It gets published on Maven Central as `io.github.plasmon-scala::scala3-presentation-compiler`.
+
+
+Below is Dotty's original README
+
+---
+
 Dotty
 =====
 [![Dotty CI](https://github.com/scala/scala3/workflows/Dotty/badge.svg?branch=main)](https://github.com/scala/scala3/actions?query=branch%3Amain)
