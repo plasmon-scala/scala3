@@ -1,6 +1,7 @@
 package dotty.tools.pc
 
 import java.nio.file.Paths
+import java.util.Optional
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -113,7 +114,8 @@ final class AutoImportsProvider(
         edits <- mkEdit(sym)
       yield (AutoImportsResultImpl(
         sym.owner.showFullName,
-        edits.asJava
+        edits.asJava,
+        Optional.of(sym.name.decoded)
       ), sym)
 
       all match
