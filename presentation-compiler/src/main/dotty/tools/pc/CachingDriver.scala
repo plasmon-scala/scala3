@@ -18,6 +18,7 @@ import dotty.tools.dotc.interactive.LogicalPackagesProvider
 import dotty.tools.dotc.interactive.ParsedLogicalPackage
 import dotty.tools.dotc.reporting.Diagnostic
 import dotty.tools.dotc.util.SourceFile
+import dotty.tools.dotc.core.Comments
 import dotty.tools.dotc.core.Contexts.Context
 import dotty.tools.dotc.core.Contexts.ContextBase
 import dotty.tools.dotc.config.Platform
@@ -221,7 +222,7 @@ class CachingDriver private (
           }
       }
     }
-    baseCtx.initialCtx
+    baseCtx.initialCtx.withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
   }
 
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =
