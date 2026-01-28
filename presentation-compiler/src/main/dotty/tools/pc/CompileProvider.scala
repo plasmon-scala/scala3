@@ -27,13 +27,19 @@ object CompileProvider:
       val ctx = driver.currentCtx
       unit.map(ctx.fresh.setCompilationUnit).getOrElse(ctx)
 
+    val code = unit
+      .map(u => List(u.tpdTree))
+      .getOrElse(driver.openedTrees(uri).map(_.tree))
+      .map(_.showIndented(2))
+      .mkString("\n- ")
+
+    val diag = driver.currentCtx.reporter.allErrors ++
+      driver.currentCtx.reporter.allWarnings ++
+      driver.currentCtx.reporter.allInfos
+
     CompileProvider.Result(
       Nil,
-      unit
-        .map(u => List(u.tpdTree))
-        .getOrElse(driver.openedTrees(uri).map(_.tree))
-        .map(_.showIndented(2))
-        .mkString("\n- ")
+      code + "\n\n\n/*\n\n" + diag.map(_.toString + "\n").mkString + "\n*/"
     )
   end compile
 
