@@ -42,12 +42,14 @@ object `presentation-compiler` extends SbtModule with PublishModule {
   def scalaVersion = "3.8.1"
   private def mtagsVersion = "1.6.5-1"
   def mvnDeps = Seq(
+    mvn"com.lihaoyi::pprint:0.8.1",
     mvn"org.lz4:lz4-java:1.8.0",
     mvn"io.get-coursier:interface:1.0.18",
     mvn"io.github.plasmon-scala:mtags-interfaces:$mtagsVersion"
       .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j"))
       .exclude(("org.eclipse.lsp4j", "org.eclipse.lsp4j.jsonrpc")),
-    mvn"io.github.plasmon-scala:mtags_2.13.16:$mtagsVersion",
+    mvn"io.github.plasmon-scala:mtags_2.13.16:$mtagsVersion"
+      .exclude(("com.lihaoy", "pprint_2.13")),
     mvn"org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1",
     mvn"org.scala-lang:scala3-compiler_3:${scalaVersion()}"
   )
