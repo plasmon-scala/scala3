@@ -37,7 +37,7 @@ object HoverProvider:
       search: SymbolSearch,
       contentType: ContentType,
       userLogger: java.util.function.Consumer[String]
-  )(implicit reportContext: ReportContext): ju.Optional[HoverSignature] =
+  )(implicit reportContext: ReportContext): Seq[ScalaHover] =
     val uri = params.uri().nn
     val text = params.text().nn
     val sourceFile = SourceFile.virtual(uri, text)
@@ -65,11 +65,7 @@ object HoverProvider:
       using indexedContext
     )
 
-    def hoverSignature(
-        symbol: Symbol,
-        symbolTpes: Seq[(Symbol, Type, Option[String])],
-        tpe: Type
-    ): ju.Optional[HoverSignature] = {
+    def hoverSignature(symbol: Symbol, tpe: Type): Seq[ScalaHover] = {
       val exprTpw = tpe.widenTermRefExpr.deepDealiasAndSimplify
       val hoverString =
         tpw match
@@ -90,8 +86,7 @@ object HoverProvider:
         end match
       end hoverString
 
-      val docString = symbolTpes
-        .flatMap(symTpe => search.symbolDocumentation(module, symTpe._1, contentType))
+      val docString = search.symbolDocumentation(module, symbol, contentType)
         .map(_.docstring())
         .mkString("\n")
 
@@ -108,7 +103,7 @@ object HoverProvider:
                 !symbol.is(Module) &&
                 !symbol.flags.isAllOf(EnumCase)
             )
-          ju.Optional.of(
+          Seq(
             new ScalaHover(
               expressionType = Some(expressionType),
               symbolSignature = Some(hoverString),
@@ -117,9 +112,9 @@ object HoverProvider:
               contextInfo = printer.getUsedRenamesInfo,
               contentType = contentType
             )
-          ).nn
+          )
         case _ =>
-          ju.Optional.empty().nn
+          Nil
     }
 
     if tp.isError || tpw == NoType || tpw.isError || path.isEmpty
@@ -164,10 +159,10 @@ object HoverProvider:
 
       derivesClauseSymbolOpt match
         case Some((symbol, tpe)) =>
-          hoverSignature(symbol, List((symbol, tpe, None)), tpe)
+          hoverSignature(symbol, tpe)
         case None =>
           reportContext.unsanitized.create(() => report, /*ifVerbose =*/ true)
-          ju.Optional.empty().nn
+          Nil
     else
       val skipCheckOnName =
         !pos.isPoint // don't check isHoveringOnName for RangeHover
@@ -175,34 +170,37 @@ object HoverProvider:
       val printer = ShortenedTypePrinter(search, IncludeDefaultParam.Include)(
         using indexedContext
       )
-      MetalsInteractive.enclosingSymbolsWithExpressionType(
+      val symbolTpes = MetalsInteractive.enclosingSymbolsWithExpressionType(
         enclosing,
         pos,
         indexedContext,
         skipCheckOnName
-      ) match
-        case Nil =>
-          fallbackToDynamics(path, printer, contentType)
-        case (symbol, _, _) :: _
-            if symbol.name == nme.selectDynamic || symbol.name == nme.applyDynamic =>
-          fallbackToDynamics(path, printer, contentType)
-        case symbolTpes @ ((symbol, tpe, None) :: _) =>
-          hoverSignature(symbol, symbolTpes, tpe)
-        case (_, tpe, Some(namedTupleArg)) :: _ =>
-          val exprTpw = tpe.widenTermRefExpr.deepDealiasAndSimplify
-          printer.expressionType(exprTpw) match
-            case Some(tpe) =>
-              ju.Optional.of(
-                new ScalaHover(
-                  expressionType = Some(tpe),
-                  symbolSignature = Some(s"$namedTupleArg: $tpe"),
-                  docstring = None,
-                  forceExpressionType = false,
-                  contextInfo = printer.getUsedRenamesInfo,
-                  contentType = contentType
+      )
+      if (symbolTpes.isEmpty)
+        fallbackToDynamics(path, printer, contentType)
+      else
+        symbolTpes.flatMap {
+          case (symbol, tpe, _)
+              if symbol.name == nme.selectDynamic || symbol.name == nme.applyDynamic =>
+            fallbackToDynamics(path, printer, contentType)
+          case (symbol, tpe, None) =>
+            hoverSignature(symbol, tpe)
+          case (_, tpe, Some(namedTupleArg)) =>
+            val exprTpw = tpe.widenTermRefExpr.deepDealiasAndSimplify
+            printer.expressionType(exprTpw) match
+              case Some(tpe) =>
+                Seq(
+                  new ScalaHover(
+                    expressionType = Some(tpe),
+                    symbolSignature = Some(s"$namedTupleArg: $tpe"),
+                    docstring = None,
+                    forceExpressionType = false,
+                    contextInfo = printer.getUsedRenamesInfo,
+                    contentType = contentType
+                  )
                 )
-              ).nn
-            case _ => ju.Optional.empty().nn
+              case _ => Nil
+        }
     end if
   end hover
 
@@ -213,9 +211,9 @@ object HoverProvider:
       path: List[Tree],
       printer: ShortenedTypePrinter,
       contentType: ContentType
-  )(using Context): ju.Optional[HoverSignature] = path match
+  )(using Context): Seq[ScalaHover] = path match
     case SelectDynamicExtractor(sel, n, name, rest) =>
-      def findRefinement(tp: Type): Option[HoverSignature] =
+      def findRefinement(tp: Type): Option[ScalaHover] =
         tp match
           case RefinedType(_, refName, tpe)
               if (name == refName.toString() || refName.toString() == nme.Fields.toString()) =>
@@ -262,9 +260,9 @@ object HoverProvider:
 
       val refTpe: List[Type] = extractRefinements(sel.typeOpt)
 
-      refTpe.flatMap(findRefinement).headOption.asJava
+      refTpe.flatMap(findRefinement)
     case _ =>
-      ju.Optional.empty().nn
+      Nil
 
 end HoverProvider
 
