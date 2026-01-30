@@ -380,33 +380,34 @@ object InteractiveEnrichments extends CommonMtagsEnrichments:
     def expandRangeToEnclosingApply(
         pos: SourcePosition
     )(using Context): List[Tree] =
-      def tryTail(enclosing: List[Tree]): Option[List[Tree]] =
+      def tryTail(enclosing: List[Tree]): List[Tree] =
         enclosing match
-          case Nil => None
+          case Nil => Nil
           case head :: tail =>
-            head match
+            val newTail = head match
               case t: GenericApply
                   if t.fun.srcPos.span.contains(
                     pos.span
                   ) && !t.typeOpt.isErroneous =>
-                tryTail(tail).orElse(Some(enclosing))
+                tryTail(tail)
               case in: Inlined =>
-                tryTail(tail).orElse(Some(enclosing))
+                tryTail(tail)
               case New(_) =>
                 tail match
-                  case Nil => None
+                  case Nil => Nil
                   case Select(_, _) :: next =>
                     tryTail(next)
                   case _ =>
-                    None
+                    tail // !
               case sel @ Select(qual, nme.apply) if qual.span == sel.nameSpan =>
-                tryTail(tail).orElse(Some(enclosing))
+                tryTail(tail)
               case _ =>
-                None
+                tail
+            head :: newTail
       path match
         case head :: tail =>
-          tryTail(tail).getOrElse(path)
-        case _ =>
+          head :: tryTail(tail)
+        case Nil =>
           List(EmptyTree)
     end expandRangeToEnclosingApply
 
