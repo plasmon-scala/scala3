@@ -44,6 +44,9 @@ import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j as l
 import scala.meta.internal.pc.HasCompilerAccess
 import dotty.tools.dotc.config.Properties
+import l.Hover
+import scala.meta.internal.pc.ScalaHover
+import scala.meta.internal.pc.HoverMarkup
 
 class ScalaPresentationCompiler(
     javaHome: Path,
@@ -558,7 +561,8 @@ class ScalaPresentationCompiler(
       params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      HoverProvider.hover(module, params, driver, search, config.hoverContentType(), userLogger)
+      val hovers = HoverProvider.hover(module, params, driver, search, config.hoverContentType(), userLogger)
+      ScalaPresentationCompiler.hoverList(hovers).asJava
     }(params.toQueryContext)
   end hover
 
@@ -698,3 +702,56 @@ class ScalaPresentationCompiler(
   def emptyQueryContext = PcQueryContext(None, additionalReportData)
 
 end ScalaPresentationCompiler
+
+object ScalaPresentationCompiler:
+  // Faking a list of HoverSignature
+  // Calling withRange(null) returns the next element or null
+  final case class HoverSignatureLinkedList(
+    underlying: ScalaHover,
+    tail: List[ScalaHover]
+  ) extends HoverSignature:
+    override def signature(): ju.Optional[String] =
+      underlying.signature()
+    override def getRange(): ju.Optional[l.Range] =
+      underlying.getRange()
+    override def toLsp(): l.Hover =
+      if (tail.isEmpty)
+        underlying.toLsp()
+      else {
+        val markups = (underlying :: tail)
+          .map { hover =>
+            HoverMarkup(
+              hover.expressionType.getOrElse(""),
+              hover.symbolSignature,
+              hover.docstring.getOrElse(""),
+              hover.forceExpressionType,
+              hover.contextInfo,
+              markdown = hover.contentType == ContentType.MARKDOWN
+            )
+          }
+          .mkString("\n\n***\n\n")
+        val mergedMarkups = markups.toMarkupContent(contentType)
+        new l.Hover(mergedMarkups, underlying.range.orNull)
+      }
+    override def withRange(range: l.Range): HoverSignature =
+      if (range == null)
+        tail match {
+          case h :: t => HoverSignatureLinkedList(h, t)
+          case Nil => null
+        }
+      else
+        HoverSignatureLinkedList(
+          underlying.withRange(range) match {
+            case h: ScalaHover => h
+            case other => sys.error(s"Should not happen: not a ScalaHover: $other")
+          },
+          tail
+        )
+    override def contentType(): ContentType =
+      underlying.contentType()
+
+  def hoverList(hovers: Seq[ScalaHover]): Option[HoverSignatureLinkedList] =
+    hovers.toList match {
+      case Nil => None
+      case h :: t => Some(HoverSignatureLinkedList(h, t))
+    }
