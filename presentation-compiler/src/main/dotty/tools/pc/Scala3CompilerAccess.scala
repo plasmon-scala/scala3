@@ -38,4 +38,16 @@ class Scala3CompilerAccess(
   ): Option[String] = None
 
   protected def ignoreException(t: Throwable): Boolean = false
+
+  var beforeAccessOpt = Option.empty[(String, String, String) => Unit]
+  var afterAccessOpt = Option.empty[(String, String, String) => Unit]
+  override def beforeAccess(f: (String, String, String) => Unit): Unit = {
+    beforeAccessOpt = Some(f)
+    super.beforeAccess(f)
+  }
+  override def afterAccess(f: (String, String, String) => Unit): Unit = {
+    afterAccessOpt = Some(f)
+    super.afterAccess(f)
+  }
+
 end Scala3CompilerAccess
