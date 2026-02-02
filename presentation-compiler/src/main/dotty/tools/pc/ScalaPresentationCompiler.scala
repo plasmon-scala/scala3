@@ -140,7 +140,7 @@ class ScalaPresentationCompiler(
     this
   }
 
-  val compilerAccess: CompilerAccess[StoreReporter, InteractiveDriver] =
+  lazy val compilerAccess: Scala3CompilerAccess =
     Scala3CompilerAccess(
       config,
       sh,
@@ -159,7 +159,7 @@ class ScalaPresentationCompiler(
     for (elem <- classpath)
       userLogger.accept(s"  $elem")
     userLogger.accept("")
-    CachingDriver(driverSettings, javaHome)
+    CachingDriver(driverSettings, javaHome, compilerAccess)
   }
 
   def driverSettings =
