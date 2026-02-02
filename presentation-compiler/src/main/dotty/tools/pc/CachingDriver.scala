@@ -66,8 +66,6 @@ class CachingDriver private (
   private var lastCompiledURI: URI = uninitialized
   private var previousDiags = List.empty[Diagnostic]
 
-  private var printedCp = false
-
   override protected def initCtx: Context = {
     val baseCtx: ContextBase = new ContextBase { baseCtx0 =>
       override protected def newPlatform(using Context): Platform = {
@@ -208,13 +206,7 @@ class CachingDriver private (
                 }
 
               val cp = super.classPath
-              val processedCp = process(cp).getOrElse(AggregateClassPath(Nil))
-              if (!printedCp) {
-                System.err.println("cp = " + pprint.apply(cp))
-                System.err.println("processedCp = " + pprint.apply(processedCp))
-                printedCp = true
-              }
-              processedCp match {
+              process(cp).getOrElse(AggregateClassPath(Nil)) match {
                 case agg: AggregateClassPath =>
                   AggregateClassPath(modCp +: agg.aggregates)
                 case other =>
