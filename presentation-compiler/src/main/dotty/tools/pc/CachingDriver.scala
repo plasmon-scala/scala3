@@ -29,6 +29,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 import scala.compiletime.uninitialized
 import ju.UUID
+import dotty.tools.dotc.report
+import ju.function.Consumer
+import dotty.tools.dotc.reporting.Reporter
 
 /**
  * CachingDriver is a wrapper class that provides a compilation cache for InteractiveDriver.
@@ -51,7 +54,8 @@ import ju.UUID
 class CachingDriver(
     override val settings: List[String],
     javaHome: Path,
-    compilerAccess: Scala3CompilerAccess
+    compilerAccess: Scala3CompilerAccess,
+    userLogger: Consumer[String]
 ) extends InteractiveDriver(settings):
 
   private var lastCompiledURI: URI = uninitialized
@@ -207,7 +211,16 @@ class CachingDriver(
           }
       }
     }
-    baseCtx.initialCtx.withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+    baseCtx.initialCtx
+      .withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+      .fresh
+      .setReporter(
+        new Reporter {
+          def doReport(dia: Diagnostic)(using Context): Unit = {
+            userLogger.accept(dia.toString)
+          }
+        }
+      )
   }
 
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =

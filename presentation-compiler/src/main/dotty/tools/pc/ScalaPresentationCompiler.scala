@@ -159,7 +159,7 @@ class ScalaPresentationCompiler(
     for (elem <- classpath)
       userLogger.accept(s"  $elem")
     userLogger.accept("")
-    CachingDriver(driverSettings, javaHome, compilerAccess)
+    CachingDriver(driverSettings, javaHome, compilerAccess, userLogger)
   }
 
   def driverSettings =
