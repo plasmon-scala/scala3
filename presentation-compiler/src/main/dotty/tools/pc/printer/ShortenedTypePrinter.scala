@@ -377,7 +377,7 @@ class ShortenedTypePrinter(
     val returnType = {
       val retType = gtpe.finalResultType
       val simplified = if (retType.typeSymbol.isAliasType) retType else retType.deepDealiasAndSimplify
-      if (gsym.isConstructor) {
+      if (!onlyMethodParams && gsym.isConstructor) {
         val maybeSealed = if (retType.typeSymbol.is(Flags.Sealed)) Seq("sealed") else Nil
         val cls =
           if (retType.typeSymbol.isAllOf(Flags.JavaInterface)) "interface"
