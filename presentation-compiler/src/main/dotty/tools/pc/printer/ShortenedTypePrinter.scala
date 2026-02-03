@@ -242,7 +242,7 @@ class ShortenedTypePrinter(
       case o if typeSymbol.is(Flags.Module) => // enum
         val keyString0 =
           if (o.is(Flags.JavaDefined) && o.is(Flags.Module) && !o.isAllOf(Flags.JavaInterface)) {
-            val maybePublic = if (o.isPublic) Nil else Seq("public")
+            val maybePublic = if (o.isPublic) Seq("public") else Nil
             val maybeFinal = if (o.is(Flags.Final)) Seq("final") else Nil
             (maybePublic ++ maybeFinal ++ Seq("class")).mkString(" ")
           }
