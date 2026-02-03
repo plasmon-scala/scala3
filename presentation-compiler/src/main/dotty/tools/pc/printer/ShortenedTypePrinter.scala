@@ -218,7 +218,7 @@ class ShortenedTypePrinter(
     val dealiased = if (tpe.isNamedTupleType) tpe.deepDealiasAndSimplify else tpe
     toText(dealiased).mkString(defaultWidth, false)
 
-  def hoverSymbol(module: GlobalSymbolIndex.Module, sym: Symbol, info: Type)(using Context): String =
+  def hoverSymbol(module: GlobalSymbolIndex.Module, sym: Symbol, info: Type)(using Context): (String, Option[String]) =
     val typeSymbol = info.typeSymbol
 
     def shortTypeString: String = tpe(info)
@@ -230,31 +230,31 @@ class ShortenedTypePrinter(
 
     sym match
       case p if p.is(Flags.Package) =>
-        s"package ${p.fullNameBackticked}"
+        (s"package ${p.fullNameBackticked}", None)
       case c if c.is(Flags.EnumVal) =>
-        s"case $name: $shortTypeString"
+        (s"case $name: $shortTypeString", None)
       // enum
       case e if e.is(Flags.Enum) || sym.companionClass.is(Flags.Enum) =>
-        s"enum $name: $ownerTypeString"
+        (s"enum $name: $ownerTypeString", None)
       /* Type cannot be shown on the right since it is already a type
        * let's instead use that space to show the full path.
        */
       case o if typeSymbol.is(Flags.Module) => // enum
-        val keyString0 =
+        val (keyString0, languageOpt) =
           if (o.is(Flags.JavaDefined) && o.is(Flags.Module) && !o.isAllOf(Flags.JavaInterface)) {
             val maybePublic = if (o.isPublic) Seq("public") else Nil
             val maybeFinal = if (o.is(Flags.Final)) Seq("final") else Nil
-            (maybePublic ++ maybeFinal ++ Seq("class")).mkString(" ")
+            ((maybePublic ++ maybeFinal ++ Seq("class")).mkString(" "), Some("java"))
           }
           else
-            keyString(o)
+            (keyString(o), None)
         val keepOwner = keyString0 match {
           case "def" | "val" | "var" | "" => true // can this happen here?
           case _ => false
         }
-        s"$keyString0 $name" + (if (keepOwner) s": $ownerTypeString" else "")
+        (s"$keyString0 $name" + (if (keepOwner) s": $ownerTypeString" else ""), languageOpt)
       case m if m.is(Flags.Method) =>
-        defaultMethodSignature(module, m, info, indent = true)
+        (defaultMethodSignature(module, m, info, indent = true), None)
       case _ =>
         val implicitKeyword =
           if (sym.is(Flags.Given)) List("given")
@@ -269,8 +269,11 @@ class ShortenedTypePrinter(
           case "def" | "var" | "val" | "" => s"$name: $shortTypeString"
           case _ => name
         }
-        (implicitKeyword ::: finalKeyword ::: keyword ::: (nameString :: Nil))
-          .mkString(" ")
+        (
+          (implicitKeyword ::: finalKeyword ::: keyword ::: (nameString :: Nil))
+            .mkString(" "),
+          None
+        )
     end match
   end hoverSymbol
 
