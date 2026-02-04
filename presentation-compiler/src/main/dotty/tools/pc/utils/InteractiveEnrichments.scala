@@ -417,6 +417,39 @@ object InteractiveEnrichments extends CommonMtagsEnrichments:
         case Nil =>
           List(EmptyTree)
     end expandRangeToEnclosingApply
+
+    def expandRangeToEnclosingApply0(
+        pos: SourcePosition
+    )(using Context): List[Tree] =
+      def tryTail(enclosing: List[Tree]): Option[List[Tree]] =
+        enclosing match
+          case Nil => None
+          case head :: tail =>
+            head match
+              case t: GenericApply
+                  if t.fun.srcPos.span.contains(
+                    pos.span
+                  ) && !t.typeOpt.isErroneous =>
+                tryTail(tail).orElse(Some(enclosing))
+              case in: Inlined =>
+                tryTail(tail).orElse(Some(enclosing))
+              case New(_) =>
+                tail match
+                  case Nil => None
+                  case Select(_, _) :: next =>
+                    tryTail(next)
+                  case _ =>
+                    None
+              case sel @ Select(qual, nme.apply) if qual.span == sel.nameSpan =>
+                tryTail(tail).orElse(Some(enclosing))
+              case _ =>
+                None
+      path match
+        case head :: tail =>
+          tryTail(tail).getOrElse(path)
+        case _ =>
+          List(EmptyTree)
+    end expandRangeToEnclosingApply0
   end extension
 
   extension (tpe: Type)
