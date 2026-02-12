@@ -239,9 +239,11 @@ class CachingDriver(
           ""
       for (f <- compilerAccess.beforeAccessOpt)
         f(id, "typechecking", uri.toASCIIString)
-      previousDiags = super.run(uri, source)
-      for (f <- compilerAccess.afterAccessOpt)
-        f(id, "typechecking", uri.toASCIIString)
+      try previousDiags = super.run(uri, source)
+      finally {
+        for (f <- compilerAccess.afterAccessOpt)
+          f(id, "typechecking", uri.toASCIIString)
+      }
     }
     lastCompiledURI = uri
     previousDiags
