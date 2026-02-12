@@ -46,10 +46,12 @@ import dotty.tools.dotc.config.Properties
 import l.Hover
 import scala.meta.internal.pc.ScalaHover
 import scala.meta.internal.pc.HoverMarkup
+import dotty.tools.dotc.reporting.Diagnostic
 
 class ScalaPresentationCompiler(
     javaHome: Path,
     userLoggerSupplier: java.util.function.Supplier[java.util.function.Consumer[String]],
+    emitDiagnostics: java.util.function.Consumer[(URI, Seq[Diagnostic])],
     var module: GlobalSymbolIndex.Module,
     var buildTargetName: Option[String] = None,
     var classpath: Seq[Path] = Nil,
@@ -156,7 +158,7 @@ class ScalaPresentationCompiler(
     for (elem <- classpath)
       userLogger.accept(s"  $elem")
     userLogger.accept("")
-    CachingDriver(driverSettings, javaHome, compilerAccess, userLogger)
+    CachingDriver(driverSettings, javaHome, compilerAccess, userLogger, emitDiagnostics)
   }
 
   def driverSettings =
