@@ -47,11 +47,13 @@ class PcDefinitionProvider(
       SourceFile.virtual(filePath.toString, text)
     )
 
-    val pos = driver.sourcePosition(params)
-    val path =
-      Interactive.pathTo(driver.openedTrees(uri), pos)(using driver.currentCtx)
-
     given ctx: Context = driver.localContext(params)
+
+    val pos = driver.sourcePosition(params)
+    val path = MetalsInteractive.workaroundPathIssues {
+      Interactive.pathTo(driver.openedTrees(uri), pos)(using driver.currentCtx)
+    }
+
     val indexedContext = IndexedContext(pos)(using ctx)
     val result =
       if findTypeDef then findTypeDefinitions(module, path, pos, indexedContext, uri)
