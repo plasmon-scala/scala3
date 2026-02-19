@@ -27,11 +27,14 @@ import dotty.tools.pc.utils.InteractiveEnrichments.*
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
+import java.util.function.Consumer
 
 class PcDefinitionProvider(
     driver: InteractiveDriver,
     params: OffsetParams,
-    search: SymbolSearch
+    search: SymbolSearch,
+    logger: Consumer[String],
+    debug: Boolean
 ):
 
   def definitions(module: GlobalSymbolIndex.Module): DefinitionResult =
@@ -94,9 +97,19 @@ class PcDefinitionProvider(
       uri: URI
   ): DefinitionResult =
     import indexed.ctx
+    val enclosingSymbols = MetalsInteractive.enclosingSymbols(path, pos, indexed)
+    if (debug) {
+      logger.accept {
+        if enclosingSymbols.isEmpty then
+          "No enclosing symbols"
+        else
+          val nl = System.lineSeparator()
+          "Enclosing symbols: " + nl + enclosingSymbols.map("  - " + _ + nl).mkString
+      }
+    }
     definitionsForSymbols(
       module,
-      MetalsInteractive.enclosingSymbols(path, pos, indexed),
+      enclosingSymbols,
       uri,
       pos
     )
@@ -124,19 +137,37 @@ class PcDefinitionProvider(
       case _ =>
         definitionsForSymbols(module, typeSymbols, uri, pos)
 
+  private val nl = System.lineSeparator()
   private def definitionsForSymbols(
       module: GlobalSymbolIndex.Module,
       symbols: List[Symbol],
       uri: URI,
       pos: SourcePosition
   )(using ctx: Context): DefinitionResult =
-    PcDefinitionProvider.semanticSymbolsSorted(symbols, identity) match
+    val sortedSymbols = PcDefinitionProvider.semanticSymbolsSorted(symbols, identity)
+    if (debug)
+      logger.accept {
+        if (sortedSymbols.isEmpty) "No sorted symbols"
+        else
+          "Sorted symbols:" + nl +
+            sortedSymbols.map(sym => s"  - $sym: ${SemanticdbSymbols.symbolName(sym)}" + nl).mkString
+      }
+    sortedSymbols match
       case Nil => DefinitionResultImpl.empty
       case syms @ (headSym :: _) =>
-        val locations = syms.flatMap:
+        val locations = syms.map:
           sym =>
-            locationsForSymbol(module, sym.sourceSymbol, SemanticdbSymbols.symbolName(sym), uri, pos)
-        DefinitionResultImpl(SemanticdbSymbols.symbolName(headSym), locations.asJava)
+            val symName = SemanticdbSymbols.symbolName(sym)
+            val locs = locationsForSymbol(module, sym.sourceSymbol, symName, uri, pos)
+            if (debug)
+              logger.accept {
+                if (locs.isEmpty) s"No location found for $symName"
+                else
+                  s"Locations for $symName:" + nl +
+                    locs.map("  " + _ + nl).mkString
+              }
+            locs
+        DefinitionResultImpl(SemanticdbSymbols.symbolName(headSym), locations.flatten.asJava)
 
   private def locationsForSymbol(
       module: GlobalSymbolIndex.Module,

@@ -88,6 +88,7 @@ class ScalaPresentationCompiler(
     PcConvertToNamedLambdaParameters.codeActionId,
   ).asJava
 
+  var debug: Boolean = false
   private val userLogger = userLoggerSupplier.get()
 
   val scalaVersion = BuildInfo.scalaVersion
@@ -276,7 +277,7 @@ class ScalaPresentationCompiler(
       params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      PcDefinitionProvider(driver, params, search).definitions(module)
+      PcDefinitionProvider(driver, params, search, userLogger, debug).definitions(module)
     }(using params.toQueryContext)
 
   override def typeDefinition(
@@ -289,7 +290,7 @@ class ScalaPresentationCompiler(
       params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      PcDefinitionProvider(driver, params, search).typeDefinitions(module)
+      PcDefinitionProvider(driver, params, search, userLogger, debug).typeDefinitions(module)
     }(using params.toQueryContext)
 
   def documentHighlight(
