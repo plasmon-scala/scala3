@@ -1,0 +1,41 @@
+name: CI
+on:
+  push:
+    branches:
+    - plasmon
+    tags:
+    - "v*"
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6.4
+    - uses: VirtusLab/scala-cli-setup@v1.0
+      with:
+        power: true
+    - name: Test
+      run: scala-cli compile presentation-compiler/src/main
+
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: coursier/setup-action@v1
+      with:
+        apps: scala-cli
+    - name: Publish
+      run: scala-cli --power publish presentation-compiler/src/main
+      env:
+        PUBLISH_USER: ${{ secrets.PUBLISH_USER }}
+        PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
+        PUBLISH_SECRET_KEY: ${{ secrets.PUBLISH_SECRET_KEY }}
+        PUBLISH_SECRET_KEY_PASSWORD: ${{ secrets.PUBLISH_SECRET_KEY_PASSWORD }}
