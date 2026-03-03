@@ -69,6 +69,9 @@ class ScalaPresentationCompiler(
     var semanticdbFileManager: SemanticdbFileManager = SemanticdbFileManager.EMPTY
 ) extends PresentationCompiler with HasCompilerAccess:
 
+  override def buildTargetId(): String =
+    module.targetId
+
   given ReportContext = reportContext
 
   override def supportedCodeActions(): ju.List[String] = List(
