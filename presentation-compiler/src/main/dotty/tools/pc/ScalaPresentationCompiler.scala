@@ -66,6 +66,9 @@ class ScalaPresentationCompiler(
     var reportContext: ReportContext = EmptyReportContext()
 ) extends PresentationCompiler with HasCompilerAccess:
 
+  override def buildTargetId(): String =
+    module.targetId
+
   given ReportContext = reportContext
 
   override def supportedCodeActions(): ju.List[String] = List(
