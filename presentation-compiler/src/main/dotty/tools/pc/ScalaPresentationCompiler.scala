@@ -63,7 +63,9 @@ class ScalaPresentationCompiler(
     var folderPath: Option[Path] = None,
     var reportsLevel: ReportLevel = ReportLevel.Info,
     var completionItemPriority: CompletionItemPriority = (_: String) => 0,
-    var reportContext: ReportContext = EmptyReportContext()
+    var reportContext: ReportContext = EmptyReportContext(),
+    // FIXME We need to pass this one around in more places and use it there
+    var preferSymbolSearch: String => Boolean = _ => false
 ) extends PresentationCompiler with HasCompilerAccess:
 
   override def buildTargetId(): String =
@@ -250,7 +252,7 @@ class ScalaPresentationCompiler(
       params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      PcDefinitionProvider(driver, params, search, userLogger, debug).definitions(module)
+      PcDefinitionProvider(driver, params, search, userLogger, preferSymbolSearch, debug).definitions(module)
     }(params.toQueryContext)
 
   override def typeDefinition(
@@ -263,7 +265,7 @@ class ScalaPresentationCompiler(
       params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      PcDefinitionProvider(driver, params, search, userLogger, debug).typeDefinitions(module)
+      PcDefinitionProvider(driver, params, search, userLogger, preferSymbolSearch, debug).typeDefinitions(module)
     }(params.toQueryContext)
 
   def documentHighlight(
