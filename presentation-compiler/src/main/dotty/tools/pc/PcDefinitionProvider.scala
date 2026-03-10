@@ -201,7 +201,7 @@ object PcDefinitionProvider:
   )(using ctx: Context): List[T] =
     syms
       .filter(f(_).exists)
-      .map { t =>
+      .groupBy { t =>
         val sym = f(t)
         // in case of having the same type and teerm symbol
         // term comes first
@@ -209,7 +209,8 @@ object PcDefinitionProvider:
         val termFlag =
           if sym.is(ModuleClass) then sym.sourceModule.isTerm
           else sym.isTerm
-        ((termFlag, SemanticdbSymbols.symbolName(sym)), t)
+        (termFlag, SemanticdbSymbols.symbolName(sym))
       }
+      .toList
       .sortBy(_._1)
-      .map(_._2)
+      .flatMap(_._2)
