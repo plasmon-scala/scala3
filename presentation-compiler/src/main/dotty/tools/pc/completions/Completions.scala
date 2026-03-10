@@ -1082,7 +1082,12 @@ class Completions(
                               s2.paramSymss.flatten.size
                             )
                             if byParamCount != 0 then byParamCount
-                            else s1.detailString.compareTo(s2.detailString)
+                            else
+                              val byDetail = s1.detailString.compareTo(s2.detailString)
+                              if byDetail != 0 then byDetail
+                              else
+                                sym1.filterText.getOrElse(sym1.label)
+                                  .compareTo(sym2.filterText.getOrElse(sym2.label))
                     end if
                   end if
                 end if
