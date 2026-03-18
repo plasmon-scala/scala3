@@ -4,6 +4,7 @@ import java.nio.file.Paths
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
+import scala.meta.internal.mtags.SourcePath
 import scala.meta.internal.pc.AutoImportsResultImpl
 import scala.meta.pc.*
 import scala.meta.pc.reports.ReportContext
@@ -74,7 +75,11 @@ final class AutoImportsProvider(
     val visitor = new CompilerSearchVisitor(visit)
     if isExtension then
       search.searchMethods(name, buildTargetIdentifier, visitor)
-    else search.search(name, buildTargetIdentifier, visitor)
+    else {
+      SourcePath.withContext { ctx =>
+        search.search(name, buildTargetIdentifier, visitor, ctx.iface)
+      }
+    }
     val results = symbols.result().filter(isExactMatch(_, name))
 
     if results.nonEmpty then

@@ -18,6 +18,8 @@ import scala.meta.internal.metals.EmptyCancelToken
 import scala.meta.internal.metals.PcQueryContext
 import scala.meta.internal.metals.ReportLevel
 import scala.meta.internal.mtags.CommonMtagsEnrichments.*
+import scala.meta.internal.mtags.GlobalSymbolIndex
+import scala.meta.internal.mtags.SourcePath
 import scala.meta.internal.pc.CompilerAccess
 import scala.meta.internal.pc.DefinitionResultImpl
 import scala.meta.internal.pc.EmptyCompletionList
@@ -39,21 +41,24 @@ import dotty.tools.pc.completions.OverrideCompletions
 import org.eclipse.lsp4j.DocumentHighlight
 import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j as l
+import scala.meta.internal.pc.HasCompilerAccess
 
-case class ScalaPresentationCompiler(
-    buildTargetIdentifier: String = "",
-    buildTargetName: Option[String] = None,
-    classpath: Seq[Path] = Nil,
-    options: List[String] = Nil,
-    search: SymbolSearch = EmptySymbolSearch,
-    ec: ExecutionContextExecutor = ExecutionContext.global,
-    sh: Option[ScheduledExecutorService] = None,
-    config: PresentationCompilerConfig = PresentationCompilerConfigImpl(),
-    folderPath: Option[Path] = None,
-    reportsLevel: ReportLevel = ReportLevel.Info,
-    completionItemPriority: CompletionItemPriority = (_: String) => 0,
-    reportContext: ReportContext = EmptyReportContext()
-) extends PresentationCompiler:
+class ScalaPresentationCompiler(
+    javaHome: Path,
+    userLoggerSupplier: java.util.function.Supplier[java.util.function.Consumer[String]],
+    var module: GlobalSymbolIndex.Module,
+    var buildTargetName: Option[String] = None,
+    var classpath: Seq[Path] = Nil,
+    var options: List[String] = Nil,
+    var search: SymbolSearch = EmptySymbolSearch,
+    var ec: ExecutionContextExecutor = ExecutionContext.global,
+    var sh: Option[ScheduledExecutorService] = None,
+    var config: PresentationCompilerConfig = PresentationCompilerConfigImpl(),
+    var folderPath: Option[Path] = None,
+    var reportsLevel: ReportLevel = ReportLevel.Info,
+    var completionItemPriority: CompletionItemPriority = (_: String) => 0,
+    var reportContext: ReportContext = EmptyReportContext()
+) extends PresentationCompiler with HasCompilerAccess:
 
   given ReportContext = reportContext
 
@@ -67,7 +72,7 @@ case class ScalaPresentationCompiler(
     PcConvertToNamedLambdaParameters.codeActionId,
   ).asJava
 
-  def this() = this("", None, Nil, Nil)
+  private val userLogger = userLoggerSupplier.get()
 
   val scalaVersion = BuildInfo.scalaVersion
 
@@ -113,29 +118,41 @@ case class ScalaPresentationCompiler(
 
   override def withCompletionItemPriority(
       priority: CompletionItemPriority
-  ): PresentationCompiler =
-    copy(completionItemPriority = priority)
+  ): this.type = {
+    this.completionItemPriority = priority
+    this
+  }
 
-  override def withBuildTargetName(buildTargetName: String): PresentationCompiler =
-    copy(buildTargetName = Some(buildTargetName))
+  override def withBuildTargetName(buildTargetName: String): this.type = {
+    this.buildTargetName = Some(buildTargetName)
+    this
+  }
 
-  override def withReportsLoggerLevel(level: String): PresentationCompiler =
-    copy(reportsLevel = ReportLevel.fromString(level))
+  override def withReportsLoggerLevel(level: String): this.type = {
+    this.reportsLevel = ReportLevel.fromString(level)
+    this
+  }
 
   val compilerAccess: CompilerAccess[StoreReporter, InteractiveDriver] =
     Scala3CompilerAccess(
       config,
       sh,
-      () => new Scala3CompilerWrapper(CachingDriver(driverSettings))
+      () => new Scala3CompilerWrapper(newDriver),
+      userLogger
     )(using ec)
 
-  val driverSettings =
+  def newDriver: InteractiveDriver = CachingDriver(driverSettings, javaHome)
+
+  def driverSettings =
     val implicitSuggestionTimeout = List("-Ximport-suggestion-timeout", "0")
     val defaultFlags = List("-color:never")
     val filteredOptions = removeDoubleOptions(options.filterNot(forbiddenOptions))
 
     filteredOptions ::: defaultFlags ::: implicitSuggestionTimeout ::: "-classpath" :: classpath
       .mkString(File.pathSeparator) :: Nil
+
+  def latestException(): Option[(Option[String], Throwable)] =
+    None // TODO
 
   private def removeDoubleOptions(options: List[String]): List[String] =
     options match
@@ -149,7 +166,9 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[Node]] =
     compilerAccess.withInterruptableCompiler(
       new ju.ArrayList[Node](),
-      params.token()
+      params.token(),
+      "semanticTokens",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       new PcSemanticTokensProvider(driver, params).provide().asJava
@@ -160,7 +179,9 @@ case class ScalaPresentationCompiler(
   ): ju.concurrent.CompletableFuture[ju.List[l.InlayHint]] =
     compilerAccess.withInterruptableCompiler(
       new ju.ArrayList[l.InlayHint](),
-      params.token()
+      params.token(),
+      "syntheticDecorations",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       new PcInlayHintsProvider(driver, params, search)
@@ -179,28 +200,35 @@ case class ScalaPresentationCompiler(
   def complete(params: OffsetParams): CompletableFuture[l.CompletionList] =
     compilerAccess.withInterruptableCompiler(
       EmptyCompletionList(),
-      params.token()
+      params.token(),
+      "complete",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      new CompletionProvider(
+      val provider = new CompletionProvider(
         search,
         driver,
-        () => InteractiveDriver(driverSettings),
+        () => newDriver,
         params,
         config,
-        buildTargetIdentifier,
+        module.asString,
         folderPath,
         completionItemPriority
-      ).completions()
+      )
+      SourcePath.withContext { ctx =>
+        provider.completions(module)(using ctx.iface)
+      }
     }(params.toQueryContext)
 
   def definition(params: OffsetParams): CompletableFuture[DefinitionResult] =
     compilerAccess.withInterruptableCompiler(
       DefinitionResultImpl.empty,
-      params.token()
+      params.token(),
+      "definition",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      PcDefinitionProvider(driver, params, search).definitions()
+      PcDefinitionProvider(driver, params, search).definitions(module)
     }(params.toQueryContext)
 
   override def typeDefinition(
@@ -208,10 +236,12 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[DefinitionResult] =
     compilerAccess.withInterruptableCompiler(
       DefinitionResultImpl.empty,
-      params.token()
+      params.token(),
+      "typeDefinition",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      PcDefinitionProvider(driver, params, search).typeDefinitions()
+      PcDefinitionProvider(driver, params, search).typeDefinitions(module)
     }(params.toQueryContext)
 
   def documentHighlight(
@@ -219,7 +249,9 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[DocumentHighlight]] =
     compilerAccess.withInterruptableCompiler(
       List.empty[DocumentHighlight].asJava,
-      params.token()
+      params.token(),
+      "documentHighlight",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       PcDocumentHighlightProvider(driver, params).highlights.asJava
@@ -230,7 +262,9 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[ReferencesResult]] =
     compilerAccess.withNonInterruptableCompiler(
       List.empty[ReferencesResult].asJava,
-      params.file().token
+      params.file().token,
+      "references",
+      params.file.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       PcReferencesProvider(driver, params)
@@ -241,7 +275,9 @@ case class ScalaPresentationCompiler(
   def inferExpectedType(params: OffsetParams): CompletableFuture[ju.Optional[String]] =
     compilerAccess.withInterruptableCompiler(
       Optional.empty(),
-      params.token
+      params.token,
+      "inferExpectedType",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       new InferExpectedType(search, driver, params).infer().asJava
@@ -261,7 +297,9 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[Optional[IPcSymbolInformation]] =
     compilerAccess.withNonInterruptableCompiler[Optional[IPcSymbolInformation]](
       Optional.empty(),
-      EmptyCancelToken
+      EmptyCancelToken,
+      "info",
+      ""
     ) { access =>
       SymbolInformationProvider(using access.compiler().currentCtx)
         .info(symbol)
@@ -276,7 +314,9 @@ case class ScalaPresentationCompiler(
     val virtualFile = CompilerVirtualFileParams(filename, code)
     compilerAccess.withNonInterruptableCompiler(
       Array.empty[Byte],
-      EmptyCancelToken
+      EmptyCancelToken,
+      "semanticdb",
+      filename.toASCIIString
     ) { access =>
       val driver = access.compiler()
       val provider = SemanticdbTextDocumentProvider(driver, folderPath)
@@ -289,10 +329,14 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[l.CompletionItem] =
     compilerAccess.withNonInterruptableCompiler(
       item,
-      EmptyCancelToken
+      EmptyCancelToken,
+      "completionItem",
+      ""
     ) { access =>
       val driver = access.compiler()
-      CompletionItemResolver.resolve(item, symbol, search, config)(using driver.currentCtx)
+      CompletionItemResolver.resolve(module, item, symbol, search, config)(using
+        driver.currentCtx
+      )
     }(emptyQueryContext)
 
   def autoImports(
@@ -304,7 +348,9 @@ case class ScalaPresentationCompiler(
   ] =
     compilerAccess.withNonInterruptableCompiler(
       List.empty[scala.meta.pc.AutoImportsResult].asJava,
-      params.token()
+      params.token(),
+      "autoImports",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       new AutoImportsProvider(
@@ -313,7 +359,7 @@ case class ScalaPresentationCompiler(
         name,
         params,
         config,
-        buildTargetIdentifier
+        module.asString
       )
         .autoImports(isExtension)
         .asJava
@@ -325,10 +371,13 @@ case class ScalaPresentationCompiler(
     val empty: ju.List[l.TextEdit] = new ju.ArrayList[l.TextEdit]()
     compilerAccess.withNonInterruptableCompiler(
       empty,
-      params.token()
+      params.token(),
+      "implementAbstractMembers",
+      params.uri.toASCIIString
     ) { pc =>
       val driver = pc.compiler()
       OverrideCompletions.implementAllAt(
+        module,
         params,
         driver,
         search,
@@ -342,7 +391,9 @@ case class ScalaPresentationCompiler(
     val empty: ju.List[l.TextEdit] = new ju.ArrayList[l.TextEdit]()
     compilerAccess.withNonInterruptableCompiler(
       empty,
-      params.token()
+      params.token(),
+      "inferredType",
+      params.uri.toASCIIString
     ) { pc =>
       new InferredTypeProvider(params, pc.compiler(), config, search)
         .inferredTypeEdits()
@@ -367,7 +418,12 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[l.TextEdit]] =
     val empty: Either[String, List[l.TextEdit]] = Right(List())
     (compilerAccess
-      .withInterruptableCompiler(empty, params.token()) { pc =>
+      .withInterruptableCompiler(
+        empty,
+        params.token(),
+        "inlineValue",
+        params.uri.toASCIIString
+      ) { pc =>
         new PcInlineValueProvider(pc.compiler(), params)
           .getInlineTextEdits()
       }(params.toQueryContext))
@@ -381,7 +437,12 @@ case class ScalaPresentationCompiler(
       extractionPos: OffsetParams
   ): CompletableFuture[ju.List[l.TextEdit]] =
     val empty: ju.List[l.TextEdit] = new ju.ArrayList[l.TextEdit]()
-    compilerAccess.withInterruptableCompiler(empty, range.token()) {
+    compilerAccess.withInterruptableCompiler(
+      empty,
+      range.token(),
+      "extractMethod",
+      range.uri.toASCIIString
+    ) {
       pc =>
         new ExtractMethodProvider(
           range,
@@ -406,7 +467,12 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[l.TextEdit]] =
     val empty: Either[String, List[l.TextEdit]] = Right(List())
     (compilerAccess
-      .withNonInterruptableCompiler(empty, params.token()) { pc =>
+      .withNonInterruptableCompiler(
+        empty,
+        params.token(),
+        "convertToNamedArguments",
+        params.uri.toASCIIString
+      ) { pc =>
         new ConvertToNamedArgumentsProvider(
           pc.compiler(),
           params,
@@ -422,7 +488,8 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[l.SelectionRange]] =
     CompletableFuture.completedFuture {
       compilerAccess.withSharedCompiler(
-        List.empty[l.SelectionRange].asJava
+        List.empty[l.SelectionRange].asJava,
+        params.asScala.headOption.map(_.uri().toASCIIString()).getOrElse("")
       ) { pc =>
         new SelectionRangeProvider(
           pc.compiler(),
@@ -432,15 +499,22 @@ case class ScalaPresentationCompiler(
     }
   end selectionRange
 
+  def compile(
+      params: VirtualFileParams
+  ): CompletableFuture[CompileResult] =
+    ???
+
   def hover(
       params: OffsetParams
   ): CompletableFuture[ju.Optional[HoverSignature]] =
     compilerAccess.withNonInterruptableCompiler(
       ju.Optional.empty[HoverSignature](),
-      params.token()
+      params.token(),
+      "hover",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      HoverProvider.hover(params, driver, search, config.hoverContentType())
+      HoverProvider.hover(module, params, driver, search, config.hoverContentType(), userLogger)
     }(params.toQueryContext)
   end hover
 
@@ -449,7 +523,9 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.Optional[l.Range]] =
     compilerAccess.withNonInterruptableCompiler(
       Optional.empty[l.Range](),
-      params.token()
+      params.token(),
+      "prepareRename",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       Optional.ofNullable(
@@ -463,30 +539,34 @@ case class ScalaPresentationCompiler(
   ): CompletableFuture[ju.List[l.TextEdit]] =
     compilerAccess.withNonInterruptableCompiler(
       List[l.TextEdit]().asJava,
-      params.token()
+      params.token(),
+      "rename",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
       PcRenameProvider(driver, params, Some(name)).rename().asJava
     }(params.toQueryContext)
 
   def newInstance(
-      buildTargetIdentifier: String,
+      moduleString: String,
       classpath: ju.List[Path],
       options: ju.List[String]
-  ): PresentationCompiler =
-    copy(
-      buildTargetIdentifier = buildTargetIdentifier,
-      classpath = classpath.asScala.toSeq,
-      options = options.asScala.toList
-    )
+  ): this.type = {
+    this.module = GlobalSymbolIndex.Module.fromString(moduleString)
+    this.classpath = classpath.asScala.toSeq
+    this.options = options.asScala.toList
+    this
+  }
 
   def signatureHelp(params: OffsetParams): CompletableFuture[l.SignatureHelp] =
     compilerAccess.withNonInterruptableCompiler(
       new l.SignatureHelp(),
-      params.token()
+      params.token(),
+      "signatureHelp",
+      params.uri.toASCIIString
     ) { access =>
       val driver = access.compiler()
-      SignatureHelpProvider.signatureHelp(driver, params, search)
+      SignatureHelpProvider.signatureHelp(module, driver, params, search)
     }(params.toQueryContext)
 
   override def didChange(
@@ -503,32 +583,46 @@ case class ScalaPresentationCompiler(
   override def didClose(uri: URI): Unit =
     compilerAccess.withNonInterruptableCompiler(
       (),
-      EmptyCancelToken
+      EmptyCancelToken,
+      "close",
+      uri.toASCIIString
     ) { access => access.compiler().close(uri) }(emptyQueryContext)
 
   override def withExecutorService(
       executorService: ExecutorService
-  ): PresentationCompiler =
-    copy(ec = ExecutionContext.fromExecutorService(executorService))
+  ): this.type = {
+    this.ec = ExecutionContext.fromExecutorService(executorService)
+    this
+  }
 
   override def withConfiguration(
       config: PresentationCompilerConfig
-  ): PresentationCompiler =
-    copy(config = config)
+  ): this.type = {
+    this.config = config
+    this
+  }
 
   override def withScheduledExecutorService(
       sh: ScheduledExecutorService
-  ): PresentationCompiler =
-    copy(sh = Some(sh))
+  ): this.type = {
+    this.sh = Some(sh)
+    this
+  }
 
-  def withSearch(search: SymbolSearch): PresentationCompiler =
-    copy(search = search)
+  def withSearch(search: SymbolSearch): this.type = {
+    this.search = search
+    this
+  }
 
-  override def withReportContext(reportContext: ReportContext): PresentationCompiler =
-    copy(reportContext = reportContext)
+  override def withReportContext(reportContext: ReportContext): this.type = {
+    this.reportContext = reportContext
+    this
+  }
 
-  def withWorkspace(workspace: Path): PresentationCompiler =
-    copy(folderPath = Some(workspace))
+  def withWorkspace(workspace: Path): this.type = {
+    this.folderPath = Some(workspace)
+    this
+  }
 
   override def isLoaded() = compilerAccess.isLoaded()
 

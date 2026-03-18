@@ -6,6 +6,7 @@ import java.net.URI
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters.*
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.pc.CompletionFuzzy
 import scala.meta.pc.PresentationCompilerConfig
 import scala.meta.pc.SymbolSearch
@@ -59,6 +60,7 @@ object CaseKeywordCompletion:
    *    unapply completions
    */
   def contribute(
+      module: GlobalSymbolIndex.Module,
       selector: Tree,
       completionPos: CompletionPos,
       indexedContext: IndexedContext,
@@ -216,6 +218,7 @@ object CaseKeywordCompletion:
                   val sealedMembers0 =
                     res.filter((si, _) => sealedDescs.contains(si.sym))
                   sortSubclasses(
+                    module,
                     selectorSym.info,
                     sealedMembers0,
                     completionPos.sourceUri,
@@ -263,6 +266,7 @@ object CaseKeywordCompletion:
    *  @param typedtree typed tree of the file, used for generating auto imports
    */
   def matchContribute(
+      module: GlobalSymbolIndex.Module,
       selector: Tree,
       completionPos: CompletionPos,
       indexedContext: IndexedContext,
@@ -293,7 +297,7 @@ object CaseKeywordCompletion:
           .flatMap(si =>
             completionGenerator.labelForCaseMember(si.sym, si.name).map((si, _))
           )
-      sortSubclasses(tpe, subclasses, completionPos.sourceUri, search)
+      sortSubclasses(module, tpe, subclasses, completionPos.sourceUri, search)
 
     val (labels, imports) =
       sortedSubclasses.map((si, label) => (label, si.importSel)).unzip
@@ -333,6 +337,7 @@ object CaseKeywordCompletion:
   end matchContribute
 
   private def sortSubclasses[A](
+      module: GlobalSymbolIndex.Module,
       tpe: Type,
       syms: List[(SymbolImport, String)],
       uri: URI,
@@ -342,7 +347,7 @@ object CaseKeywordCompletion:
       syms.sortBy(_._1.sym.sourcePos.point)
     else
       val defnSymbols = search
-        .definitionSourceToplevels(SemanticdbSymbols.symbolName(tpe.typeSymbol), uri).nn
+        .definitionSourceToplevels(module.asString, SemanticdbSymbols.symbolName(tpe.typeSymbol), uri).nn
         .asScala
         .zipWithIndex
         .toMap

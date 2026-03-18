@@ -18,10 +18,12 @@ import dotty.tools.pc.printer.ShortenedTypePrinter.IncludeDefaultParam
 import dotty.tools.pc.utils.InteractiveEnrichments.*
 
 import org.eclipse.lsp4j as l
+import scala.meta.internal.mtags.GlobalSymbolIndex
 
 object SignatureHelpProvider:
 
   def signatureHelp(
+      module: GlobalSymbolIndex.Module,
       driver: InteractiveDriver,
       params: OffsetParams,
       search: SymbolSearch
@@ -50,7 +52,7 @@ object SignatureHelpProvider:
           signature.denot.map(signature -> _)
 
         val signatureInfos = infos.map { case (signature, denot) =>
-          search.symbolDocumentation(denot.symbol) match
+          search.symbolDocumentation(module, denot.symbol) match
             case Some(doc) =>
               withDocumentation(
                 doc,
