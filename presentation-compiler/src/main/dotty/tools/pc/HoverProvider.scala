@@ -101,12 +101,15 @@ object HoverProvider:
       val printer = ShortenedTypePrinter(search, IncludeDefaultParam.Include)(
         using IndexedContext(pos)(using printerCtx)
       )
-      val symbolTpes = MetalsInteractive.enclosingSymbolsWithExpressionType(
-        enclosing,
-        pos,
-        indexedContext,
-        skipCheckOnName
-      )
+      val symbolTpes = {
+        val l = MetalsInteractive.enclosingSymbolsWithExpressionType(
+          enclosing,
+          pos,
+          indexedContext,
+          skipCheckOnName
+        )
+        PcDefinitionProvider.semanticSymbolsSorted(l, _._1)
+      }
       if (symbolTpes.isEmpty)
         fallbackToDynamics(path, printer, contentType)
       else
