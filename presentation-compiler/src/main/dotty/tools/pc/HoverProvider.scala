@@ -61,6 +61,8 @@ object HoverProvider:
     val tp = typeFromPath(path)
     val tpw = tp.widenTermRefExpr
     // For expression we need to find all enclosing applies to get the exact generic type
+    val enclosing0 = path.expandRangeToEnclosingApply0(pos)
+    val seeStuffFrom = enclosing0.head
     val enclosing = path.expandRangeToEnclosingApply(pos)
 
     if tp.isError || tpw == NoType || tpw.isError || path.isEmpty
@@ -101,6 +103,15 @@ object HoverProvider:
       val printer = ShortenedTypePrinter(search, IncludeDefaultParam.Include)(
         using IndexedContext(pos)(using printerCtx)
       )
+      val symbolTpes0 = {
+        val l = MetalsInteractive.enclosingSymbolsWithExpressionType(
+          enclosing0,
+          pos,
+          indexedContext,
+          skipCheckOnName
+        )
+        PcDefinitionProvider.semanticSymbolsSorted(l, _._1)
+      }
       val symbolTpes = {
         val l = MetalsInteractive.enclosingSymbolsWithExpressionType(
           enclosing,
@@ -113,12 +124,16 @@ object HoverProvider:
       if (symbolTpes.isEmpty)
         fallbackToDynamics(path, printer, contentType)
       else
+        val (firstSymbol, firstTpe, _) = symbolTpes0.head
+        val expresionTypeOpt0 =
+          if firstSymbol.name == StdNames.nme.??? then
+            InferExpectedType(search, driver, params).infer()
+          else printer.expressionType(firstTpe.widenTermRefExpr.deepDealiasAndSimplify)
         symbolTpes.flatMap {
-          case (symbol, tpe, _)
+          case (symbol, _, _)
               if symbol.name == nme.selectDynamic || symbol.name == nme.applyDynamic =>
             fallbackToDynamics(path, printer, contentType)
           case (symbol, tpe, None) =>
-            val exprTpw = tpe.widenTermRefExpr.deepDealiasAndSimplify
             val (hoverString, languageOpt) =
               tpw match
                 // https://github.com/scala/scala3/issues/8891
@@ -127,7 +142,7 @@ object HoverProvider:
                 case _ =>
                   val (innerTpe, sym) =
                     if symbol.isType then (symbol.typeRef, symbol)
-                    else enclosing.head.seenFrom(symbol)
+                    else seeStuffFrom.seenFrom(symbol)
 
                   val finalTpe =
                     if tpe.isNamedTupleType then tpe.widenTermRefExpr
@@ -144,7 +159,10 @@ object HoverProvider:
             val expresionTypeOpt =
               if symbol.name == StdNames.nme.??? then
                 InferExpectedType(search, driver, params).infer()
-              else printer.expressionType(exprTpw)
+              else
+                expresionTypeOpt0.orElse {
+                  printer.expressionType(tpe.widenTermRefExpr.deepDealiasAndSimplify)
+                }
             expresionTypeOpt match
               case Some(expressionType) =>
                 val forceExpressionType =
