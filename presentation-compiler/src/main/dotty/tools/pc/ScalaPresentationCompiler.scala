@@ -691,6 +691,7 @@ object ScalaPresentationCompiler:
               hover.expressionType.getOrElse(""),
               hover.symbolSignature,
               hover.docstring.getOrElse(""),
+              hover.codeLanguage.getOrElse("scala"),
               hover.forceExpressionType,
               hover.contextInfo,
               markdown = hover.contentType == ContentType.MARKDOWN
