@@ -129,13 +129,13 @@ class PcDefinitionProvider(
       uri: URI,
       pos: SourcePosition
   )(using ctx: Context): DefinitionResult =
-    semanticSymbolsSorted(symbols) match
+    PcDefinitionProvider.semanticSymbolsSorted(symbols, identity) match
       case Nil => DefinitionResultImpl.empty
-      case syms @ ((_, headSym) :: _) =>
+      case syms @ (headSym :: _) =>
         val locations = syms.flatMap:
-          case (sym, semanticdbSymbol) =>
-            locationsForSymbol(module, sym, semanticdbSymbol, uri, pos)
-        DefinitionResultImpl(headSym, locations.asJava)
+          sym =>
+            locationsForSymbol(module, sym.sourceSymbol, SemanticdbSymbols.symbolName(sym), uri, pos)
+        DefinitionResultImpl(SemanticdbSymbols.symbolName(headSym), locations.asJava)
 
   private def locationsForSymbol(
       module: GlobalSymbolIndex.Module,
@@ -175,21 +175,25 @@ class PcDefinitionProvider(
             case _ => Nil
         else Nil
 
-  def semanticSymbolsSorted(
-      syms: List[Symbol]
-  )(using ctx: Context): List[(Symbol, String)] =
-    syms
-      .collect {
-        case sym if sym.exists =>
-          // in case of having the same type and teerm symbol
-          // term comes first
-          // used only for ordering symbols that come from `Import`
-          val termFlag =
-            if sym.is(ModuleClass) then sym.sourceModule.isTerm
-            else sym.isTerm
-          (termFlag, sym.sourceSymbol, SemanticdbSymbols.symbolName(sym))
-      }
-      .sortBy { case (termFlag, _, name) => (termFlag, name) }
-      .map(_.tail)
-
 end PcDefinitionProvider
+
+object PcDefinitionProvider:
+
+  def semanticSymbolsSorted[T](
+      syms: List[T],
+      f: T => Symbol
+  )(using ctx: Context): List[T] =
+    syms
+      .filter(f(_).exists)
+      .map { t =>
+        val sym = f(t)
+        // in case of having the same type and teerm symbol
+        // term comes first
+        // used only for ordering symbols that come from `Import`
+        val termFlag =
+          if sym.is(ModuleClass) then sym.sourceModule.isTerm
+          else sym.isTerm
+        ((termFlag, SemanticdbSymbols.symbolName(sym)), t)
+      }
+      .sortBy(_._1)
+      .map(_._2)
