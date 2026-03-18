@@ -240,17 +240,36 @@ class ShortenedTypePrinter(
        * let's instead use that space to show the full path.
        */
       case o if typeSymbol.is(Flags.Module) => // enum
-        s"${keyString(o)} $name: $ownerTypeString"
+        val keyString0 =
+          if (o.is(Flags.JavaDefined) && o.is(Flags.Module) && !o.isAllOf(Flags.JavaInterface)) {
+            val maybePublic = if (o.isPublic) Nil else Seq("public")
+            val maybeFinal = if (o.is(Flags.Final)) Seq("final") else Nil
+            (maybePublic ++ maybeFinal ++ Seq("class")).mkString(" ")
+          }
+          else
+            keyString(o)
+        val keepOwner = keyString0 match {
+          case "def" | "val" | "var" | "" => true // can this happen here?
+          case _ => false
+        }
+        s"$keyString0 $name" + (if (keepOwner) s": $ownerTypeString" else "")
       case m if m.is(Flags.Method) =>
-        defaultMethodSignature(module, m, info)
+        defaultMethodSignature(module, m, info, indent = true)
       case _ =>
         val implicitKeyword =
-          if sym.is(Flags.Implicit) then List("implicit") else Nil
-        val finalKeyword = if sym.is(Flags.Final) then List("final") else Nil
+          if (sym.is(Flags.Given)) List("given")
+          else if (sym.is(Flags.Implicit)) List("implicit")
+          else Nil
         val keyOrEmpty = keyString(sym)
-        val keyword =
-          if keyOrEmpty.iterator.nonEmpty then List(keyOrEmpty) else Nil
-        (implicitKeyword ::: finalKeyword ::: keyword ::: (s"$name:" :: shortTypeString :: Nil))
+        val finalKeyword =
+          if (sym.is(Flags.Final) && !keyOrEmpty.contains("case class")) List("final")
+          else Nil
+        val keyword = if keyOrEmpty.nonEmpty then List(keyOrEmpty) else Nil
+        val nameString = keyOrEmpty match {
+          case "def" | "var" | "val" | "" => s"$name: $shortTypeString"
+          case _ => name
+        }
+        (implicitKeyword ::: finalKeyword ::: keyword ::: (nameString :: Nil))
           .mkString(" ")
   end hoverSymbol
 
@@ -290,7 +309,8 @@ class ShortenedTypePrinter(
       gsym: Symbol,
       gtpe: Type,
       onlyMethodParams: Boolean = false,
-      additionalMods: List[String] = Nil
+      additionalMods: List[String] = Nil,
+      indent: Boolean = false
   ): String =
     val namess = gtpe.paramNamess
     val infoss = gtpe.paramInfoss
@@ -348,16 +368,28 @@ class ShortenedTypePrinter(
     val paramLabelss = label(methodParams)
     val extLabelss = label(extParams)
 
-    val retType = gtpe.finalResultType
-    val simplified = if retType.typeSymbol.isAliasType then retType else retType.deepDealiasAndSimplify
-    val returnType = tpe(simplified)
+    val returnType = {
+      val retType = gtpe.finalResultType
+      val simplified = if retType.typeSymbol.isAliasType then retType else retType.deepDealiasAndSimplify
+      if (gsym.isConstructor) {
+        val maybeSealed = if (retType.typeSymbol.is(Flags.Sealed)) Seq("sealed") else Nil
+        val cls =
+          if (retType.typeSymbol.isAllOf(Flags.JavaInterface)) "interface"
+          else if (retType.typeSymbol.is(Flags.Trait)) "trait"
+          else {
+            (if (retType.typeSymbol.is(Flags.Abstract)) "abstract " else "") +
+              "class"
+          }
+        (maybeSealed ++ Seq(cls, tpe(simplified))).mkString(" ")
+      }
+      else
+        tpe(simplified)
+    }
     def extensionSignatureString =
       val extensionSignature = paramssString(extLabelss, extParams)
       if extParams.nonEmpty then
         extensionSignature.mkString("extension ", "", " ")
       else ""
-    val paramssSignature = paramssString(paramLabelss, methodParams)
-      .mkString("", "", s": ${returnType}")
 
     val flags = (gsym.flags & methodFlags)
     val flagsSeq =
@@ -371,13 +403,23 @@ class ShortenedTypePrinter(
       case Nil => ""
       case xs => xs.mkString("", " ", " ")
 
-    if onlyMethodParams then paramssSignature
+    if (onlyMethodParams)
+      paramssString(paramLabelss, methodParams, indent = indent)
+        .mkString("", "", s": $returnType")
     else
       // For Scala2 compatibility, show "this" instead of <init> for constructor
-      val name = if gsym.isConstructor then StdNames.nme.this_ else gsym.name
+      val name =
+        if (gsym.isConstructor) returnType
+        else s"${mods}def ${gsym.name}"
+      val paramssString0 = {
+        val base = paramssString(paramLabelss, methodParams, indent = indent).mkString
+        if (gsym.isConstructor && base == "()") ""
+        else base
+      }
       extensionSignatureString +
-        s"${mods}def $name" +
-        paramssSignature
+        name +
+        paramssString0 +
+        (if (gsym.isConstructor) "" else s": $returnType")
   end defaultMethodSignature
 
   def defaultValueSignature(
@@ -447,24 +489,32 @@ class ShortenedTypePrinter(
 
   private def paramssString(
       paramLabels: Iterator[Iterator[String]],
-      paramss: List[List[Symbol]]
+      paramss: List[List[Symbol]],
+      indent: Boolean = false
   )(using Context): Iterator[String] =
     paramLabels
       .zipAll(paramss, Nil, Nil)
       .map { case (params, syms) =>
+        def paramsMkString(params0: Seq[String], start: String, sep: String, end: String): String =
+          if (indent && params0.length >= 4)
+            params0.mkString(start + "\n  ", sep + "\n  ", "\n" + end)
+          else
+            params0.mkString(start, sep, end)
         Params.paramsKind(syms) match
           case Params.Kind.TypeParameter if params.iterator.nonEmpty =>
-            params.iterator.mkString("[", ", ", "]")
+            paramsMkString(params.iterator.to(Vector), "[", ", ", "]")
           case Params.Kind.Normal =>
-            params.iterator.mkString("(", ", ", ")")
+            paramsMkString(params.iterator.to(Vector), "(", ", ", ")")
           case Params.Kind.Using if params.iterator.nonEmpty =>
-            params.iterator.mkString(
+            paramsMkString(
+              params.iterator.to(Vector),
               "(using ",
               ", ",
               ")"
             )
           case Params.Kind.Implicit if params.iterator.nonEmpty =>
-            params.iterator.mkString(
+            paramsMkString(
+              params.iterator.to(Vector),
               "(implicit ",
               ", ",
               ")"
