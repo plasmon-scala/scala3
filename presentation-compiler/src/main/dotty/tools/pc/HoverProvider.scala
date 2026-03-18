@@ -119,7 +119,7 @@ object HoverProvider:
             fallbackToDynamics(path, printer, contentType)
           case (symbol, tpe, None) =>
             val exprTpw = tpe.widenTermRefExpr.deepDealiasAndSimplify
-            val hoverString =
+            val (hoverString, languageOpt) =
               tpw match
                 // https://github.com/scala/scala3/issues/8891
                 case tpw: ImportType =>
@@ -136,7 +136,6 @@ object HoverProvider:
 
                   printer.hoverSymbol(module, sym, finalTpe.deepDealiasAndSimplify)
               end match
-            end hoverString
 
             val docString = search.symbolDocumentation(module, symbol, contentType)
               .map(_.docstring())
@@ -160,6 +159,7 @@ object HoverProvider:
                     expressionType = Some(expressionType),
                     symbolSignature = Some(hoverString),
                     docstring = Some(docString),
+                    codeLanguage = languageOpt,
                     forceExpressionType = forceExpressionType,
                     contextInfo = printer.getUsedRenamesInfo,
                     contentType = contentType
