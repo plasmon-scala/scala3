@@ -107,6 +107,32 @@ object MetalsInteractive:
     enclosingSymbolsWithExpressionType(path, pos, indexed, skipCheckOnName)
       .map(_._1.sourceSymbol)
 
+  private object KindOfBlock {
+    def unapply(tree: Tree)(using Context): Option[List[ValDef]] =
+      tree match {
+        case Block(stats, _) =>
+          Some {
+            stats.collect {
+              case v @ ValDef(_, _, _) => v
+            }
+          }
+        case Template(constr, preParentsOrDerived, self, preBody) =>
+          val trees = preBody match {
+            case l: dotty.tools.dotc.ast.Trees.Lazy[List[Tree]] =>
+              l.complete
+            case l: List[Tree] =>
+              l
+          }
+          Some {
+            trees.collect {
+              case v @ ValDef(_, _, _) => v
+            }
+          }
+        case _ =>
+          None
+      }
+  }
+
   /** Returns the list of tuple enclosing symbol and the symbol's expression
    *  type if possible.
    */
@@ -119,6 +145,40 @@ object MetalsInteractive:
   ): List[(Symbol, Type, Option[String])] =
     import indexed.ctx
     path match
+      case (ident @ Ident(nme)) ::
+        UnApply(TypeApply(Select(_, StdNames.nme.unapply), _), Nil, args) ::
+          Bind(_, _) ::
+          CaseDef(_, _, _) ::
+          Match(_, _) ::
+          ValDef(syntheticName, _, _) ::
+          KindOfBlock(stats) ::
+          _
+          if nme == StdNames.nme.WILDCARD &&
+              args.exists(_ eq ident) &&
+              stats.exists {
+                case ValDef(name, _, _) =>
+                  name == syntheticName
+                case _ =>
+                  false
+              } =>
+        val idx = args.indexWhere(_ eq ident)
+        val stats0 = stats
+          .dropWhile {
+            case ValDef(name, _, _) =>
+              name != syntheticName
+            case _ =>
+              true
+          }
+          .drop(1)
+          .collect {
+            case v @ ValDef(_, _, _) => v
+          }
+        if (stats0.length >= idx + 1) {
+          val valDef = stats0(idx)
+          List((valDef.symbol, valDef.tpe, None))
+        }
+        else
+          Nil
       // For a named arg, find the target `DefDef` and jump to the param
       case NamedArg(name, _) :: Apply(fn, _) :: _ =>
         val funSym = fn.symbol
