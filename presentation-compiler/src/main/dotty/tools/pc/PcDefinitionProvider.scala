@@ -50,11 +50,12 @@ class PcDefinitionProvider(
     )
 
     val pos = driver.sourcePosition(params)
-    val path =
-      Interactive.pathTo(driver.openedTrees(uri), pos)(using driver.currentCtx)
-
     val unit = driver.currentCtx.run.nn.units.head
     val newctx = driver.currentCtx.fresh.setCompilationUnit(unit)
+    val path = MetalsInteractive.workaroundPathIssues {
+      Interactive.pathTo(driver.openedTrees(uri), pos)(using driver.currentCtx)
+    }(using newctx)
+
     val indexedContext = IndexedContext(pos, path, newctx)
     import indexedContext.ctx
     val result =
