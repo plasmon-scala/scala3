@@ -50,9 +50,11 @@ object HoverProvider:
       val ctx = driver.currentCtx
       unit.map(ctx.fresh.setCompilationUnit).getOrElse(ctx)
     val pos = driver.sourcePosition(params)
-    val path = unit
-      .map(unit => Interactive.pathTo(unit.tpdTree, pos.span))
-      .getOrElse(Interactive.pathTo(driver.openedTrees(uri), pos))
+    val path = MetalsInteractive.workaroundPathIssues {
+      unit
+        .map(unit => Interactive.pathTo(unit.tpdTree, pos.span))
+        .getOrElse(Interactive.pathTo(driver.openedTrees(uri), pos))
+    }
     val indexedContext = IndexedContext(pos)(using ctx)
 
     def typeFromPath(path: List[Tree]) =

@@ -108,14 +108,15 @@ object MetalsInteractive:
       .map(_._1.sourceSymbol)
 
   private object KindOfBlock {
-    def unapply(tree: Tree)(using Context): Option[List[ValDef]] =
+    def unapply(tree: Tree)(using Context): Option[(List[ValDef], List[Tree])] =
       tree match {
-        case Block(stats, _) =>
-          Some {
+        case Block(stats, body) =>
+          Some {(
             stats.collect {
               case v @ ValDef(_, _, _) => v
-            }
-          }
+            },
+            List(body)
+          )}
         case Template(constr, preParentsOrDerived, self, preBody) =>
           val trees = preBody match {
             case l: dotty.tools.dotc.ast.Trees.Lazy[List[Tree]] =>
@@ -123,15 +124,30 @@ object MetalsInteractive:
             case l: List[Tree] =>
               l
           }
-          Some {
+          Some {(
             trees.collect {
               case v @ ValDef(_, _, _) => v
+            },
+            trees.flatMap {
+              // ???
+              case v @ ValDef(_, _, _) => Nil
+              case other => Seq(other)
             }
-          }
+          )}
         case _ =>
           None
       }
   }
+
+  def workaroundPathIssues(path: List[Tree])(using Context): List[Tree] =
+    path match
+      case (_ @ TypeTree()) :: TypeApply(_, _) :: ValDef(name, _, _) :: KindOfBlock(stats, body :: _) :: rem
+        if name.toString.contains("$") &&
+            stats.forall { case ValDef(name0, _, _) => name0.toString.contains("$") } =>
+        body :: rem
+      case _ =>
+        path
+    end match
 
   /** Returns the list of tuple enclosing symbol and the symbol's expression
    *  type if possible.
@@ -151,28 +167,21 @@ object MetalsInteractive:
           CaseDef(_, _, _) ::
           Match(_, _) ::
           ValDef(syntheticName, _, _) ::
-          KindOfBlock(stats) ::
+          KindOfBlock(stats, _) ::
           _
           if nme == StdNames.nme.WILDCARD &&
               args.exists(_ eq ident) &&
               stats.exists {
                 case ValDef(name, _, _) =>
                   name == syntheticName
-                case _ =>
-                  false
               } =>
         val idx = args.indexWhere(_ eq ident)
         val stats0 = stats
           .dropWhile {
             case ValDef(name, _, _) =>
               name != syntheticName
-            case _ =>
-              true
           }
           .drop(1)
-          .collect {
-            case v @ ValDef(_, _, _) => v
-          }
         if (stats0.length >= idx + 1) {
           val valDef = stats0(idx)
           List((valDef.symbol, valDef.tpe, None))
