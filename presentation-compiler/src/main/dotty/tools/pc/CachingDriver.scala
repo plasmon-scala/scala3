@@ -1,6 +1,7 @@
 package dotty.tools.pc
 
-import java.io.File
+import scala.meta.internal.pc.*
+
 import java.net.URI
 import java.nio.file.Path
 import java.util as ju
@@ -19,6 +20,24 @@ import dotty.tools.dotc.interactive.{
 }
 import dotty.tools.dotc.reporting.Diagnostic
 import dotty.tools.dotc.util.SourceFile
+import dotty.tools.dotc.core.Comments
+import dotty.tools.dotc.core.Contexts.Context
+import dotty.tools.dotc.core.Contexts.ContextBase
+import dotty.tools.dotc.config.JavaPlatform
+import dotty.tools.dotc.config.Platform
+import dotty.tools.dotc.config.SJSPlatform
+import dotty.tools.dotc.classpath.AggregateClassPath
+import dotty.tools.dotc.classpath.BinaryFileEntry
+import dotty.tools.dotc.classpath.ClassPath
+import dotty.tools.dotc.classpath.PackageNameUtils
+import dotty.tools.dotc.classpath.SourceFileEntry
+import java.io.File
+import java.nio.file.Paths
+import java.nio.file.Path
+import java.net.URL
+import dotty.tools.io.AbstractFile
+import dotty.tools.io.metals.Archives
+import java.util.concurrent.ConcurrentHashMap
 
 /** CachingDriver is a wrapper class that provides a compilation cache for
  *  InteractiveDriver. CachingDriver skips running compilation if
@@ -46,6 +65,100 @@ class CachingDriver private (
   private var lastCompiledURI: URI = uninitialized
   private var previousDiags = List.empty[Diagnostic]
 
+  override protected def initCtx: Context = {
+    val baseCtx: ContextBase = new ContextBase { baseCtx0 =>
+      override protected def newPlatform(using Context): Platform = {
+        if (baseCtx0.settings.scalajs.value) new SJSPlatform(sourcePackage.value)
+        else
+          new JavaPlatform(sourcePackage.value) {
+            override def classPath(using Context): ClassPath = {
+
+              val modFiles = baseCtx0.settings.classpath.value
+                .split(File.pathSeparator)
+                .filter(_.endsWith(".jmod"))
+                .map(Paths.get(_))
+
+              lazy val modCp: ClassPath = new ClassPath {
+                import CachingDriver.fza
+
+                def cpIterator(): Iterator[Path] =
+                  modFiles.iterator
+
+                private def packageDir(archive: AbstractFile, pkg: String): Option[AbstractFile] = {
+                  val dirName = ("classes" +: pkg.split('.').filter(_.nonEmpty)).mkString("/")
+                  Option(archive.lookupName(dirName, directory = true))
+                }
+
+                override def asURLs: Seq[URL] =
+                  cpIterator()
+                    .map(_.toUri.toURL)
+                    .toVector
+
+                override def findClassFile(className: String): Option[AbstractFile] = {
+                  val (pkg, simpleName) = PackageNameUtils.separatePkgAndClassNames(className)
+                  cpIterator()
+                    .flatMap(f => packageDir(fza(f), pkg).iterator)
+                    .flatMap(dir => Option(dir.lookupName(simpleName + ".class", directory = false)).iterator)
+                    .take(1)
+                    .toList
+                    .headOption
+                }
+
+                override def hasPackage(pkg: String): Boolean =
+                  cpIterator().exists(f => packageDir(fza(f), pkg).nonEmpty)
+
+                override def packages(inPackage: String): Iterable[String] = {
+                  val prefix = PackageNameUtils.packagePrefix(inPackage)
+                  cpIterator()
+                    .flatMap(f => packageDir(fza(f), inPackage).iterator)
+                    .flatMap(_.iterator)
+                    .filter(_.isDirectory)
+                    .map(prefix + _.name)
+                    .toVector
+                    .distinct
+                }
+                override def classes(inPackage: String): Iterable[BinaryFileEntry] =
+                  cpIterator()
+                    .flatMap(f => packageDir(fza(f), inPackage).iterator)
+                    .flatMap(_.iterator)
+                    .filter(!_.isDirectory)
+                    .filter(_.name.endsWith(".class"))
+                    .map(BinaryFileEntry(_))
+                    .toVector
+                    .distinct
+                // Listing the JDK sources would make the compiler load JDK classes from them:
+                // SymbolLoaders prefers sources at least as recent as their class files,
+                // which is all of them in JDKs with reproducible timestamps
+                override def sources(inPackage: String): Iterable[SourceFileEntry] =
+                  Nil
+              }
+
+              def process(cp: ClassPath): Option[ClassPath] =
+                cp match {
+                  case agg: AggregateClassPath =>
+                    val res = agg.aggregates.flatMap(cp0 => process(cp0).toSeq)
+                    if (res.isEmpty) None
+                    else Some(AggregateClassPath(res))
+                  case _: dotty.tools.dotc.classpath.JrtClassPath =>
+                    None
+                  case other =>
+                    Some(other)
+                }
+
+              val cp = super.classPath
+              process(cp).getOrElse(AggregateClassPath(Nil)) match {
+                case agg: AggregateClassPath =>
+                  AggregateClassPath(modCp +: agg.aggregates)
+                case other =>
+                  AggregateClassPath(Seq(modCp, other))
+              }
+            }
+          }
+      }
+    }
+    baseCtx.initialCtx.withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+  }
+
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =
     compilationUnits.get(uri) match
       case Some(unit)
@@ -60,7 +173,7 @@ class CachingDriver private (
     previousDiags
 
   def freshDriver(): InteractiveDriver =
-    new InteractiveDriver(settings, sourcePackage)
+    new CachingDriver(settings, sourcePackage)
 
 end CachingDriver
 
@@ -80,3 +193,16 @@ object CachingDriver:
       case SourcePathMode.MBT =>
         Some(ParsedLogicalPackage.fromMbtIndex(semanticdbFileManager.listAllPackages()))
     new CachingDriver(settings, CachedLogicalPackage(sourcePackagesExtractor))
+
+  private val fzaCache = new ConcurrentHashMap[Path, AbstractFile]
+  private def fza(path: Path): AbstractFile = {
+    val valueOrNull = fzaCache.get(path)
+    if (valueOrNull == null) {
+      val fza0 = Archives.fileZipArchive(path)
+      val previousOrNull = fzaCache.putIfAbsent(path, fza0)
+      if (previousOrNull == null) fza0
+      else previousOrNull
+    }
+    else
+      valueOrNull
+  }

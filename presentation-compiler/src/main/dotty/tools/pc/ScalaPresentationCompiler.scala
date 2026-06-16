@@ -49,6 +49,7 @@ import org.eclipse.lsp4j as l
 import scala.meta.internal.pc.HasCompilerAccess
 
 class ScalaPresentationCompiler(
+    javaHome: Path,
     userLoggerSupplier: java.util.function.Supplier[java.util.function.Consumer[String]],
     var module: GlobalSymbolIndex.Module,
     var buildTargetName: Option[String] = None,
