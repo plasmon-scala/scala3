@@ -37,6 +37,8 @@ import dotty.tools.dotc.classpath.PackageEntry
 import dotty.tools.io.FileZipArchive
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.function.Consumer
+import dotty.tools.dotc.reporting.Reporter
 
 /** CachingDriver is a wrapper class that provides a compilation cache for
  *  InteractiveDriver. CachingDriver skips running compilation if
@@ -60,7 +62,8 @@ class CachingDriver private (
     override val settings: List[String],
     precomputedSourcePackages: Option[LogicalPackage],
     javaHome: Path,
-    compilerAccess: Scala3CompilerAccess
+    compilerAccess: Scala3CompilerAccess,
+    userLogger: Consumer[String]
 ) extends InteractiveDriver(settings, precomputedSourcePackages):
 
   private var lastCompiledURI: URI = uninitialized
@@ -216,7 +219,16 @@ class CachingDriver private (
           }
       }
     }
-    baseCtx.initialCtx.withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+    baseCtx.initialCtx
+      .withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+      .fresh
+      .setReporter(
+        new Reporter {
+          def doReport(dia: Diagnostic)(using Context): Unit = {
+            userLogger.accept(dia.toString)
+          }
+        }
+      )
   }
 
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =
