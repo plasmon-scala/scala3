@@ -52,7 +52,7 @@ object Dependencies {
 
   val lz4 = "at.yawk.lz4" % "lz4-java" % "1.11.1"
 
-  private val mtagsVersion = "1.6.8"
+  private val mtagsVersion = "1.6.8" // used by Plasmon
   val mtagsInterfaces = "org.scalameta" % "mtags-interfaces" % mtagsVersion
   val mtagsShared = "org.scalameta" % s"mtags-shared_${Versions.scala2Version}" % mtagsVersion
 
