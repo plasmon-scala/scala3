@@ -1,6 +1,7 @@
 package dotty.tools.pc
 
-import java.io.File
+import scala.meta.internal.pc.*
+
 import java.net.URI
 import java.nio.file.Path
 import java.util as ju
@@ -17,6 +18,23 @@ import dotty.tools.dotc.interactive.LogicalPackagesProvider
 import dotty.tools.dotc.interactive.ParsedLogicalPackage
 import dotty.tools.dotc.reporting.Diagnostic
 import dotty.tools.dotc.util.SourceFile
+import dotty.tools.dotc.core.Contexts.Context
+import dotty.tools.dotc.core.Contexts.ContextBase
+import dotty.tools.dotc.config.Platform
+import dotty.tools.io.ClassPath
+import dotty.tools.dotc.classpath.AggregateClassPath
+import java.io.File
+import java.nio.file.Paths
+import java.nio.file.Path
+import java.net.URL
+import dotty.tools.io.AbstractFile
+import dotty.tools.dotc.classpath.PackageName
+import dotty.tools.dotc.classpath.ClassPathEntries
+import dotty.tools.dotc.classpath.ClassFileEntry
+import dotty.tools.dotc.classpath.SourceFileEntry
+import dotty.tools.dotc.classpath.PackageEntry
+import dotty.tools.io.FileZipArchive
+import java.util.concurrent.ConcurrentHashMap
 
 /** CachingDriver is a wrapper class that provides a compilation cache for
  *  InteractiveDriver. CachingDriver skips running compilation if
@@ -38,11 +56,173 @@ import dotty.tools.dotc.util.SourceFile
  */
 class CachingDriver private (
     override val settings: List[String],
-    precomputedSourcePackages: Option[LogicalPackage]
+    precomputedSourcePackages: Option[LogicalPackage],
+    javaHome: Path
 ) extends InteractiveDriver(settings, precomputedSourcePackages):
 
   private var lastCompiledURI: URI = uninitialized
   private var previousDiags = List.empty[Diagnostic]
+
+  private var printedCp = false
+
+  override protected def initCtx: Context = {
+    val baseCtx: ContextBase = new ContextBase { baseCtx0 =>
+      override protected def newPlatform(using Context): Platform = {
+        if (baseCtx0.settings.scalajs.value) super.newPlatform
+        else
+          new dotty.tools.dotc.config.JavaPlatform {
+            override def classPath(using Context): ClassPath = {
+
+              val modFiles = baseCtx0.settings.classpath.value
+                .split(File.pathSeparator)
+                .filter(_.endsWith(".jmod"))
+                .map(Paths.get(_))
+
+              lazy val modCp: ClassPath = new ClassPath {
+                import java.nio.file._
+                import CachingDriver.fza
+
+                lazy val srcZip: Path = {
+                  val candidates = List(javaHome.resolve("src.zip"), javaHome.resolve("lib/src.zip"))
+                  candidates
+                    .iterator
+                    .filter(Files.isRegularFile(_))
+                    .take(1)
+                    .find(_ => true)
+                    .getOrElse {
+                      sys.error(s"No src.zip found in $candidates")
+                    }
+                }
+
+                def cpIterator(): Iterator[Path] =
+                  modFiles.iterator
+
+                def asClassPathStrings: Seq[String] =
+                  cpIterator()
+                    .map(_.toString)
+                    .toVector
+                def asSourcePathString: String =
+                  srcZip.toString
+                def asURLs: Seq[URL] =
+                  cpIterator()
+                    .map(_.toUri.toURL)
+                    .toVector
+
+                def findClassFile(className: String): Option[AbstractFile] = {
+                  val entryName = "classes/" + className.replace(".", "/") + ".class"
+                  val idx = entryName.lastIndexOf('/')
+                  val dirName = entryName.substring(0, idx + 1)
+                  val fileName = entryName.substring(idx + 1)
+                  cpIterator()
+                    .flatMap { f =>
+                      fza(f)
+                        .allDirs
+                        .get(dirName)
+                        .iterator
+                        .flatMap(_.entries.get(fileName).iterator)
+                    }
+                    .take(1)
+                    .toList
+                    .headOption
+                }
+
+                def hasPackage(pkg: PackageName): Boolean = {
+                  val dirName = ("classes" +: pkg.dottedString.split('.').filter(_.nonEmpty)).mkString("", "/", "/")
+                  cpIterator().exists(f => Option(fza(f).allDirs.get(dirName)).nonEmpty)
+                }
+
+                def list(inPackage: PackageName): ClassPathEntries =
+                  ClassPathEntries(packages(inPackage), classes(inPackage) ++ sources(inPackage))
+
+                def packages(inPackage: PackageName): Seq[PackageEntry] = {
+                  val dirName = ("classes" +: inPackage.dottedString.split('.').filter(_.nonEmpty)).mkString("", "/", "/")
+                  val prefix = if (inPackage.dottedString.isEmpty) "" else inPackage.dottedString + "."
+                  cpIterator()
+                    .flatMap { f =>
+                      fza(f)
+                        .allDirs
+                        .get(dirName)
+                        .iterator
+                        .flatMap { dirEnt =>
+                          dirEnt
+                            .entries
+                            .valuesIterator
+                            .filter(_.isDirectory)
+                            .map(e => dotty.tools.dotc.classpath.metals.Entries.packageEntry(prefix + e.name))
+                        }
+                    }
+                    .toVector
+                    .distinct
+                }
+                def classes(inPackage: PackageName): Seq[ClassFileEntry] = {
+                  val dirName = ("classes" +: inPackage.dottedString.split('.').filter(_.nonEmpty)).mkString("", "/", "/")
+                  cpIterator()
+                    .flatMap { f =>
+                      fza(f)
+                        .allDirs
+                        .get(dirName)
+                        .iterator
+                        .flatMap { dirEnt =>
+                          dirEnt
+                            .entries
+                            .valuesIterator
+                            .filter(!_.isDirectory)
+                            .filter(_.name.endsWith(".class"))
+                            .map(e => dotty.tools.dotc.classpath.metals.Entries.classFileEntry(e))
+                        }
+                    }
+                    .toVector
+                    .distinct
+                }
+                def sources(inPackage: PackageName): Seq[SourceFileEntry] = {
+                  val dirName = ("classes" +: inPackage.dottedString.split('.').filter(_.nonEmpty)).mkString("", "/", "/")
+                  fza(srcZip)
+                    .allDirs
+                    .get(dirName)
+                    .iterator
+                    .flatMap { dirEnt =>
+                      dirEnt
+                        .entries
+                        .valuesIterator
+                        .filter(e => e.name.endsWith(".scala") || e.name.endsWith(".java"))
+                        .map(e => dotty.tools.dotc.classpath.metals.Entries.sourceFileEntry(e))
+                    }
+                    .toVector
+                    .distinct
+                }
+              }
+
+              def process(cp: ClassPath): Option[ClassPath] =
+                cp match {
+                  case agg: AggregateClassPath =>
+                    val res = agg.aggregates.flatMap(cp0 => process(cp0).toSeq)
+                    if (res.isEmpty) None
+                    else Some(AggregateClassPath(res))
+                  case _: dotty.tools.dotc.classpath.JrtClassPath =>
+                    None
+                  case other =>
+                    Some(other)
+                }
+
+              val cp = super.classPath
+              val processedCp = process(cp).getOrElse(AggregateClassPath(Nil))
+              if (!printedCp) {
+                System.err.println("cp = " + pprint.apply(cp))
+                System.err.println("processedCp = " + pprint.apply(processedCp))
+                printedCp = true
+              }
+              processedCp match {
+                case agg: AggregateClassPath =>
+                  AggregateClassPath(modCp +: agg.aggregates)
+                case other =>
+                  AggregateClassPath(Seq(modCp, other))
+              }
+            }
+          }
+      }
+    }
+    baseCtx.initialCtx
+  }
 
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =
     compilationUnits.get(uri) match
@@ -64,7 +244,8 @@ object CachingDriver:
       settings: List[String],
       sourcePath: ju.function.Supplier[ju.List[Path]],
       semanticdbFileManager: SemanticdbFileManager,
-      sourcePathMode: SourcePathMode
+      sourcePathMode: SourcePathMode,
+      javaHome: Path
   ): CachingDriver =
     val precomputedSourcePackages = sourcePathMode match
       case SourcePathMode.DISABLED => None
@@ -74,4 +255,17 @@ object CachingDriver:
         if sourcePathFiles.nonEmpty then Some(new LogicalPackagesProvider(logicalSourcePath).root) else None
       case SourcePathMode.MBT =>
         Some(ParsedLogicalPackage.fromMbtIndex(semanticdbFileManager.listAllPackages()))
-    new CachingDriver(settings, precomputedSourcePackages)
+    new CachingDriver(settings, precomputedSourcePackages, javaHome)
+
+  private val fzaCache = new ConcurrentHashMap[Path, FileZipArchive]
+  private def fza(path: Path): FileZipArchive = {
+    val valueOrNull = fzaCache.get(path)
+    if (valueOrNull == null) {
+      val fza0 = new FileZipArchive(path, None)
+      val previousOrNull = fzaCache.putIfAbsent(path, fza0)
+      if (previousOrNull == null) fza0
+      else previousOrNull
+    }
+    else
+      valueOrNull
+  }

@@ -4,6 +4,7 @@ package completions
 import java.util as ju
 
 import scala.jdk.CollectionConverters.*
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompilerConfig
 import scala.meta.pc.PresentationCompilerConfig.OverrideDefFormat
@@ -46,6 +47,7 @@ object OverrideCompletions:
    *    position).
    */
   def contribute(
+      module: GlobalSymbolIndex.Module,
       td: TypeDef,
       completing: Option[Symbol],
       start: Int,
@@ -114,6 +116,7 @@ object OverrideCompletions:
     overridables
       .map(sym =>
         toCompletionValue(
+          module,
           sym.denot,
           start,
           td,
@@ -130,6 +133,7 @@ object OverrideCompletions:
   end contribute
 
   def implementAllAt(
+      module: GlobalSymbolIndex.Module,
       params: OffsetParams,
       driver: InteractiveDriver,
       search: SymbolSearch,
@@ -201,6 +205,7 @@ object OverrideCompletions:
           config
         )
         lazy val implementAll = implementAllFor(
+          module,
           indexedContext,
           text,
           search,
@@ -218,6 +223,7 @@ object OverrideCompletions:
   end implementAllAt
 
   private def implementAllFor(
+      module: GlobalSymbolIndex.Module,
       indexedContext: IndexedContext,
       text: String,
       search: SymbolSearch,
@@ -295,6 +301,7 @@ object OverrideCompletions:
     val completionValues = overridables
       .map(sym =>
         toCompletionValue(
+          module,
           sym.denot,
           0, // we don't care the position of each completion value from ImplementAll
           defn,
@@ -391,6 +398,7 @@ object OverrideCompletions:
     )
 
   private def toCompletionValue(
+      module: GlobalSymbolIndex.Module,
       sym: SymDenotation,
       start: Int,
       defn: TargetDef,
@@ -430,6 +438,7 @@ object OverrideCompletions:
 
       if sym.is(Method) then
         printer.defaultMethodSignature(
+          module,
           sym.symbol,
           seenFrom,
           additionalMods =
