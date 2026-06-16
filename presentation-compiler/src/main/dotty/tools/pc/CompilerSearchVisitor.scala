@@ -69,7 +69,7 @@ class CompilerSearchVisitor(
     loop(List(pkgSym), parts)
   end toSymbols
 
-  def visitClassfile(pkgPath: String, filename: String): Int =
+  def visitClassfile(pkgPath: String, filename: String, ctx: SourcePathContext): Int =
     val pkg = normalizePackage(pkgPath)
 
     val innerPath = filename

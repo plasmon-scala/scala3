@@ -9,6 +9,7 @@ import scala.meta.internal.mtags.CoursierComplete
 import scala.meta.internal.pc.CompletionFuzzy
 import scala.meta.internal.pc.IdentifierComparator
 import scala.meta.internal.pc.MemberOrdering
+import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.pc.*
 import scala.meta.pc.reports.ReportContext
 import scala.util.control.NonFatal
@@ -41,7 +42,7 @@ class Completions(
     text: String,
     ctx: Context,
     search: SymbolSearch,
-    buildTargetIdentifier: String,
+    moduleString: String,
     completionPos: CompletionPos,
     indexedContext: IndexedContext,
     path: List[Tree],
@@ -131,7 +132,7 @@ class Completions(
   def enrichedCompilerCompletions(
       qualType: Type,
       fromPath: List[Tree] = path
-  ): (List[CompletionValue], SymbolSearch.Result) =
+  )(using SourcePathContext): (List[CompletionValue], SymbolSearch.Result) =
     val compilerCompletions = Completion
       .rawCompletions(
         completionPos.originalCursorPosition,
@@ -152,7 +153,7 @@ class Completions(
    *  of the qualifier symbol, we can still provide sensible completions
    *  for the apply.
    */
-  def withGuessApplyType(sel: Select)(using Context): List[CompletionValue] =
+  def withGuessApplyType(sel: Select)(using Context, SourcePathContext): List[CompletionValue] =
     val qual = sel.qualifier
     val name = sel.name
     indexedContext.lookupSym(qual.symbol) match
@@ -165,8 +166,8 @@ class Completions(
       case _ =>
         Nil
 
-  def completions(): (List[CompletionValue], SymbolSearch.Result) =
-    val (advanced, exclusive) = advancedCompletions(path, completionPos)
+  def completions(module: GlobalSymbolIndex.Module)(using SourcePathContext): (List[CompletionValue], SymbolSearch.Result) =
+    val (advanced, exclusive) = advancedCompletions(module, path, completionPos)
     val (all, result) =
       if exclusive then (advanced, SymbolSearch.Result.COMPLETE)
       else
@@ -369,9 +370,10 @@ class Completions(
    *    true Metals should provide advanced completions only.
    */
   private def advancedCompletions(
+      module: GlobalSymbolIndex.Module,
       path: List[Tree],
       completionPos: CompletionPos
-  ): (List[CompletionValue], Boolean) =
+  )(using SourcePathContext): (List[CompletionValue], Boolean) =
     val pos = completionPos.originalCursorPosition
     lazy val rawPath = Paths
       .get(pos.source.path).nn
@@ -403,6 +405,7 @@ class Completions(
       case MatchCaseExtractor.MatchExtractor(selector) =>
         (
           CaseKeywordCompletion.matchContribute(
+            module,
             selector,
             completionPos,
             indexedContext,
@@ -421,6 +424,7 @@ class Completions(
           ) =>
         (
           CaseKeywordCompletion.contribute(
+            module,
             selector,
             completionPos,
             indexedContext,
@@ -441,6 +445,7 @@ class Completions(
           ) =>
         (
           CaseKeywordCompletion.contribute(
+            module,
             selector,
             completionPos,
             indexedContext,
@@ -460,6 +465,7 @@ class Completions(
           ) =>
         (
           CaseKeywordCompletion.contribute(
+            module,
             selector,
             completionPos,
             indexedContext,
@@ -476,6 +482,7 @@ class Completions(
       case Ident(name) :: (unapp: UnApply) :: _ =>
         (
           CaseKeywordCompletion.contribute(
+            module,
             EmptyTree, // no selector
             completionPos,
             indexedContext,
@@ -490,6 +497,7 @@ class Completions(
       case Select(_, name) :: (unapp: UnApply) :: _ =>
         (
           CaseKeywordCompletion.contribute(
+            module,
             EmptyTree, // no selector
             completionPos,
             indexedContext,
@@ -507,6 +515,7 @@ class Completions(
       case OverrideExtractor(td, completing, start, exhaustive, fallbackName) =>
         (
           OverrideCompletions.contribute(
+            module,
             td,
             completing,
             start,
@@ -538,7 +547,7 @@ class Completions(
             this,
             config.isCompletionSnippetsEnabled(),
             search,
-            buildTargetIdentifier
+            moduleString
           )
           .filterInteresting(enrich = false)
           ._1
@@ -623,7 +632,7 @@ class Completions(
   private def enrichWithSymbolSearch(
       visit: CompletionValue => Boolean,
       qualType: Type
-  ): Option[SymbolSearch.Result] =
+  )(using SourcePathContext): Option[SymbolSearch.Result] =
     val query = completionPos.query
     if completionMode.is(Mode.Scope) && query.nonEmpty then
       val visitor = new CompilerSearchVisitor(sym =>
@@ -650,7 +659,7 @@ class Completions(
               ).map(visit).forall(_ == true)
         else false
       )
-      Some(search.search(query, buildTargetIdentifier, visitor).nn)
+      Some(search.search(query, moduleString, visitor, implicitly[SourcePathContext]).nn)
     else if completionMode.is(Mode.Member) && query.nonEmpty then
       val visitor = new CompilerSearchVisitor(sym =>
         def isExtensionMethod = sym.is(ExtensionMethod) &&
@@ -688,7 +697,7 @@ class Completions(
           ).map(visit).forall(_ == true)
         else false
       )
-      Some(search.searchMethods(query, buildTargetIdentifier, visitor).nn)
+      Some(search.searchMethods(query, moduleString, visitor).nn)
     else Some(SymbolSearch.Result.INCOMPLETE)
 
   end enrichWithSymbolSearch
@@ -739,7 +748,7 @@ class Completions(
     def filterInteresting(
         qualType: Type = ctx.definitions.AnyType,
         enrich: Boolean = true
-    ): (List[CompletionValue], SymbolSearch.Result) =
+    )(using SourcePathContext): (List[CompletionValue], SymbolSearch.Result) =
       val alreadySeen = mutable.Set.empty[String]
       val buf = List.newBuilder[CompletionValue]
       def visit(head: CompletionValue): Boolean =
