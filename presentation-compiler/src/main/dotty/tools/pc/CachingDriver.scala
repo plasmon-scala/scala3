@@ -37,6 +37,7 @@ import java.nio.file.Path
 import java.net.URL
 import dotty.tools.io.AbstractFile
 import dotty.tools.io.metals.Archives
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /** CachingDriver is a wrapper class that provides a compilation cache for
@@ -59,7 +60,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class CachingDriver private (
     override val settings: List[String],
-    sourcePackage: CachedLogicalPackage
+    sourcePackage: CachedLogicalPackage,
+    compilerAccess: Scala3CompilerAccess
 ) extends InteractiveDriver(settings, sourcePackage):
 
   private var lastCompiledURI: URI = uninitialized
@@ -168,12 +170,25 @@ class CachingDriver private (
       case _ => false
 
   override def run(uri: URI, source: SourceFile): List[Diagnostic] =
-    if !alreadyCompiled(uri, source.content) then previousDiags = super.run(uri, source)
+    if (!alreadyCompiled(uri, source.content)) {
+      val id =
+        if (compilerAccess.beforeAccessOpt.nonEmpty || compilerAccess.afterAccessOpt.nonEmpty)
+          UUID.randomUUID().toString
+        else
+          ""
+      for (f <- compilerAccess.beforeAccessOpt)
+        f(id, "typechecking", uri.toASCIIString)
+      try previousDiags = super.run(uri, source)
+      finally {
+        for (f <- compilerAccess.afterAccessOpt)
+          f(id, "typechecking", uri.toASCIIString)
+      }
+    }
     lastCompiledURI = uri
     previousDiags
 
   def freshDriver(): InteractiveDriver =
-    new CachingDriver(settings, sourcePackage)
+    new CachingDriver(settings, sourcePackage, compilerAccess)
 
 end CachingDriver
 
@@ -182,7 +197,8 @@ object CachingDriver:
       settings: List[String],
       sourcePath: ju.function.Supplier[ju.List[Path]],
       semanticdbFileManager: SemanticdbFileManager,
-      sourcePathMode: SourcePathMode
+      sourcePathMode: SourcePathMode,
+      compilerAccess: Scala3CompilerAccess
   ): CachingDriver =
     def sourcePackagesExtractor(using Context) = sourcePathMode match
       case SourcePathMode.DISABLED => None
@@ -192,7 +208,7 @@ object CachingDriver:
         if sourcePathFiles.nonEmpty then Some(new LogicalPackagesProvider(logicalSourcePath).root) else None
       case SourcePathMode.MBT =>
         Some(ParsedLogicalPackage.fromMbtIndex(semanticdbFileManager.listAllPackages()))
-    new CachingDriver(settings, CachedLogicalPackage(sourcePackagesExtractor))
+    new CachingDriver(settings, CachedLogicalPackage(sourcePackagesExtractor), compilerAccess)
 
   private val fzaCache = new ConcurrentHashMap[Path, AbstractFile]
   private def fza(path: Path): AbstractFile = {

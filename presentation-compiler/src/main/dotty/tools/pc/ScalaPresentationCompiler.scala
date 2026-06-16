@@ -154,7 +154,7 @@ class ScalaPresentationCompiler(
     this
   }
 
-  val compilerAccess: CompilerAccess[StoreReporter, CachingDriver] =
+  lazy val compilerAccess: Scala3CompilerAccess =
     Scala3CompilerAccess(
       config,
       sh,
@@ -177,7 +177,8 @@ class ScalaPresentationCompiler(
       driverSettings,
       sourcePath,
       semanticdbFileManager,
-      config.sourcePathMode()
+      config.sourcePathMode(),
+      compilerAccess
     )
   }
 
