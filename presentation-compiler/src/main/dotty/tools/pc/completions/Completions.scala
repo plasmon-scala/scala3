@@ -146,7 +146,7 @@ class Completions(
    *  of the qualifier symbol, we can still provide sensible completions
    *  for the apply.
    */
-  def withGuessApplyType(sel: Select)(using Context): List[CompletionValue] =
+  def withGuessApplyType(sel: Select)(using Context, SourcePathContext): List[CompletionValue] =
     val qual = sel.qualifier
     val name = sel.name
     indexedContext.lookupSym(qual.symbol) match

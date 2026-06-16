@@ -257,7 +257,7 @@ class ScalaPresentationCompiler(
       val provider = new CompletionProvider(
         search,
         driver,
-        () => InteractiveDriver(driverSettings, driver.logicalRootPackage),
+        // () => InteractiveDriver(driverSettings, driver.logicalRootPackage),
         () => newDriver,
         params,
         config,
@@ -618,6 +618,7 @@ class ScalaPresentationCompiler(
     this.classpath = classpath.asScala.toSeq
     this.options = options.asScala.toList
     this.sourcePath = sourcePath
+    this
   }
 
   def newInstance(

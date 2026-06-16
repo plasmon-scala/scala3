@@ -113,18 +113,28 @@ class CachingDriver private (
                     .map(_.toUri.toURL)
                     .toVector
 
-                def findClassFile(className: String): Option[AbstractFile] = {
+                def findClassFileAndModuleFile(className: String, findModule: Boolean): Option[(AbstractFile, Option[AbstractFile])] = {
                   val entryName = "classes/" + className.replace(".", "/") + ".class"
                   val idx = entryName.lastIndexOf('/')
                   val dirName = entryName.substring(0, idx + 1)
                   val fileName = entryName.substring(idx + 1)
                   cpIterator()
                     .flatMap { f =>
-                      fza(f)
+                      val archive = fza(f)
+                      archive
                         .allDirs
                         .get(dirName)
                         .iterator
-                        .flatMap(_.entries.get(fileName).iterator)
+                        .flatMap { dir =>
+                          dir.entries.get(fileName).iterator.map { classFile =>
+                            val moduleFile =
+                              if findModule then
+                                archive.allDirs.get("classes/").flatMap(_.entries.get("module-info.class"))
+                              else
+                                None
+                            (classFile, moduleFile)
+                          }
+                        }
                     }
                     .take(1)
                     .toList
@@ -269,7 +279,10 @@ object CachingDriver:
       sourcePath: ju.function.Supplier[ju.List[Path]],
       semanticdbFileManager: SemanticdbFileManager,
       sourcePathMode: SourcePathMode,
-      javaHome: Path
+      javaHome: Path,
+      compilerAccess: Scala3CompilerAccess,
+      userLogger: Consumer[String],
+      emitDiagnostics: Consumer[(URI, Seq[Diagnostic])]
   ): CachingDriver =
     val precomputedSourcePackages = sourcePathMode match
       case SourcePathMode.DISABLED => None
@@ -279,7 +292,7 @@ object CachingDriver:
         if sourcePathFiles.nonEmpty then Some(new LogicalPackagesProvider(logicalSourcePath).root) else None
       case SourcePathMode.MBT =>
         Some(ParsedLogicalPackage.fromMbtIndex(semanticdbFileManager.listAllPackages()))
-    new CachingDriver(settings, precomputedSourcePackages, javaHome)
+    new CachingDriver(settings, precomputedSourcePackages, javaHome, compilerAccess, userLogger, emitDiagnostics)
 
   private val fzaCache = new ConcurrentHashMap[Path, FileZipArchive]
   private def fza(path: Path): FileZipArchive = {
