@@ -178,7 +178,8 @@ class ScalaPresentationCompiler(
       sourcePath,
       semanticdbFileManager,
       config.sourcePathMode(),
-      compilerAccess
+      compilerAccess,
+      userLogger
     )
   }
 

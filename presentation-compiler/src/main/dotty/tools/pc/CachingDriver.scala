@@ -39,6 +39,8 @@ import dotty.tools.io.AbstractFile
 import dotty.tools.io.metals.Archives
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.function.Consumer
+import dotty.tools.dotc.reporting.Reporter
 
 /** CachingDriver is a wrapper class that provides a compilation cache for
  *  InteractiveDriver. CachingDriver skips running compilation if
@@ -61,7 +63,8 @@ import java.util.concurrent.ConcurrentHashMap
 class CachingDriver private (
     override val settings: List[String],
     sourcePackage: CachedLogicalPackage,
-    compilerAccess: Scala3CompilerAccess
+    compilerAccess: Scala3CompilerAccess,
+    userLogger: Consumer[String]
 ) extends InteractiveDriver(settings, sourcePackage):
 
   private var lastCompiledURI: URI = uninitialized
@@ -158,7 +161,16 @@ class CachingDriver private (
           }
       }
     }
-    baseCtx.initialCtx.withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+    baseCtx.initialCtx
+      .withProperty(Comments.ContextDoc, Some(new Comments.ContextDocstrings))
+      .fresh
+      .setReporter(
+        new Reporter {
+          def doReport(dia: Diagnostic)(using Context): Unit = {
+            userLogger.accept(dia.toString)
+          }
+        }
+      )
   }
 
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =
@@ -188,7 +200,7 @@ class CachingDriver private (
     previousDiags
 
   def freshDriver(): InteractiveDriver =
-    new CachingDriver(settings, sourcePackage, compilerAccess)
+    new CachingDriver(settings, sourcePackage, compilerAccess, userLogger)
 
 end CachingDriver
 
@@ -198,7 +210,8 @@ object CachingDriver:
       sourcePath: ju.function.Supplier[ju.List[Path]],
       semanticdbFileManager: SemanticdbFileManager,
       sourcePathMode: SourcePathMode,
-      compilerAccess: Scala3CompilerAccess
+      compilerAccess: Scala3CompilerAccess,
+      userLogger: Consumer[String]
   ): CachingDriver =
     def sourcePackagesExtractor(using Context) = sourcePathMode match
       case SourcePathMode.DISABLED => None
@@ -208,7 +221,7 @@ object CachingDriver:
         if sourcePathFiles.nonEmpty then Some(new LogicalPackagesProvider(logicalSourcePath).root) else None
       case SourcePathMode.MBT =>
         Some(ParsedLogicalPackage.fromMbtIndex(semanticdbFileManager.listAllPackages()))
-    new CachingDriver(settings, CachedLogicalPackage(sourcePackagesExtractor), compilerAccess)
+    new CachingDriver(settings, CachedLogicalPackage(sourcePackagesExtractor), compilerAccess, userLogger)
 
   private val fzaCache = new ConcurrentHashMap[Path, AbstractFile]
   private def fza(path: Path): AbstractFile = {
