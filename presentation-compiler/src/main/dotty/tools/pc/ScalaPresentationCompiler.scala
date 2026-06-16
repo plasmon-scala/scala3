@@ -142,10 +142,12 @@ class ScalaPresentationCompiler(
 
   override def withSemanticdbFileManager(
       semanticdbFileManager: SemanticdbFileManager
-  ): PresentationCompiler =
-    copy(semanticdbFileManager = semanticdbFileManager)
+  ): this.type = {
+    this.semanticdbFileManager = semanticdbFileManager
+    this
+  }
 
-  val compilerAccess: CompilerAccess[StoreReporter, InteractiveDriver] =
+  lazy val compilerAccess: Scala3CompilerAccess =
     Scala3CompilerAccess(
       config,
       sh,
@@ -169,7 +171,8 @@ class ScalaPresentationCompiler(
       sourcePath,
       semanticdbFileManager,
       config.sourcePathMode()
-      javaHome
+      javaHome,
+      compilerAccess
     )
   }
 

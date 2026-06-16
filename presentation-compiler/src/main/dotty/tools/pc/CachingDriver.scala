@@ -35,6 +35,7 @@ import dotty.tools.dotc.classpath.ClassFileEntry
 import dotty.tools.dotc.classpath.SourceFileEntry
 import dotty.tools.dotc.classpath.PackageEntry
 import dotty.tools.io.FileZipArchive
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /** CachingDriver is a wrapper class that provides a compilation cache for
@@ -58,7 +59,8 @@ import java.util.concurrent.ConcurrentHashMap
 class CachingDriver private (
     override val settings: List[String],
     precomputedSourcePackages: Option[LogicalPackage],
-    javaHome: Path
+    javaHome: Path,
+    compilerAccess: Scala3CompilerAccess
 ) extends InteractiveDriver(settings, precomputedSourcePackages):
 
   private var lastCompiledURI: URI = uninitialized
@@ -234,7 +236,18 @@ class CachingDriver private (
       case _ => false
 
   override def run(uri: URI, source: SourceFile): List[Diagnostic] =
-    if !alreadyCompiled(uri, source.content) then previousDiags = super.run(uri, source)
+    if (!alreadyCompiled(uri, source.content)) {
+      val id =
+        if (compilerAccess.beforeAccessOpt.nonEmpty || compilerAccess.afterAccessOpt.nonEmpty)
+          UUID.randomUUID().toString
+        else
+          ""
+      for (f <- compilerAccess.beforeAccessOpt)
+        f(id, "typechecking", uri.toASCIIString)
+      previousDiags = super.run(uri, source)
+      for (f <- compilerAccess.afterAccessOpt)
+        f(id, "typechecking", uri.toASCIIString)
+    }
     lastCompiledURI = uri
     previousDiags
 
