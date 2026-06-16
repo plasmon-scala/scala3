@@ -39,7 +39,7 @@ import mill.util.VcsVersion
 
 object `presentation-compiler` extends SbtModule with PublishModule {
   def sources = Task.Sources(os.sub / "src/main")
-  def scalaVersion = "3.8.3-RC2"
+  def scalaVersion = "3.8.4"
   private def mtagsVersion = "1.6.7-1"
   def mvnDeps = Seq(
     mvn"com.lihaoyi::pprint:0.8.1",
