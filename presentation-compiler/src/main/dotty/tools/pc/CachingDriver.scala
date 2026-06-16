@@ -63,7 +63,8 @@ class CachingDriver private (
     precomputedSourcePackages: Option[LogicalPackage],
     javaHome: Path,
     compilerAccess: Scala3CompilerAccess,
-    userLogger: Consumer[String]
+    userLogger: Consumer[String],
+    emitDiagnostics: Consumer[(URI, Seq[Diagnostic])]
 ) extends InteractiveDriver(settings, precomputedSourcePackages):
 
   private var lastCompiledURI: URI = uninitialized
@@ -248,7 +249,10 @@ class CachingDriver private (
           ""
       for (f <- compilerAccess.beforeAccessOpt)
         f(id, "typechecking", uri.toASCIIString)
-      try previousDiags = super.run(uri, source)
+      try {
+        previousDiags = super.run(uri, source)
+        emitDiagnostics.accept((uri, previousDiags))
+      }
       finally {
         for (f <- compilerAccess.afterAccessOpt)
           f(id, "typechecking", uri.toASCIIString)
