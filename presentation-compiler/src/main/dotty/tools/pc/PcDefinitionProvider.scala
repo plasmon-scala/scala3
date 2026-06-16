@@ -34,6 +34,7 @@ class PcDefinitionProvider(
     params: OffsetParams,
     search: SymbolSearch,
     logger: Consumer[String],
+    preferSymbolSearch: String => Boolean,
     debug: Boolean
 ):
 
@@ -177,7 +178,7 @@ class PcDefinitionProvider(
       pos: SourcePosition
   )(using ctx: Context): List[Location] =
     val isLocal = symbol.source == pos.source
-    if isLocal then
+    if isLocal && !preferSymbolSearch(semanticdbSymbol) then
       val trees = driver.openedTrees(uri)
       val include = Include.definitions | Include.local
       val (exportedDefs, otherDefs) =
