@@ -66,7 +66,7 @@ class ScalaPresentationCompiler(
     var completionItemPriority: CompletionItemPriority = (_: String) => 0,
     var reportContext: ReportContext = EmptyReportContext(),
     var sourcePath: ju.function.Supplier[ju.List[Path]] = () => Nil.asJava,
-    var semanticdbFileManager: SemanticdbFileManager = SemanticdbFileManager.EMPTY
+    var semanticdbFileManager: SemanticdbFileManager = SemanticdbFileManager.EMPTY,
     // FIXME We need to pass this one around in more places and use it there
     var preferSymbolSearch: String => Boolean = _ => false
 ) extends PresentationCompiler with HasCompilerAccess:
@@ -178,7 +178,7 @@ class ScalaPresentationCompiler(
       driverSettings,
       sourcePath,
       semanticdbFileManager,
-      config.sourcePathMode()
+      config.sourcePathMode(),
       javaHome,
       compilerAccess,
       userLogger,
