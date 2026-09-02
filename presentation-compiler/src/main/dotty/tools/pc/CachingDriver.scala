@@ -11,7 +11,10 @@ import scala.jdk.CollectionConverters.*
 import scala.meta.pc.SemanticdbFileManager
 import scala.meta.pc.SourcePathMode
 
-import dotty.tools.dotc.core.Contexts.Context
+import dotty.tools.dotc.core.Contexts.*
+import dotty.tools.dotc.core.Symbols.*
+import dotty.tools.dotc.core.Denotations.staticRef
+import dotty.tools.dotc.core.Decorators.*
 import dotty.tools.dotc.interactive.{
   CachedLogicalPackage,
   InteractiveDriver,
@@ -209,6 +212,101 @@ class CachingDriver private (
     given ctx: Context = currentCtx
     new SourceFile(file, ctx.settings.sourceroot.value, Codec(ctx.settings.encoding.value)):
       override def content(): Array[Char] = fileContent
+
+  /** Reads `path` afresh from disk, when it is on the source path, and re-enters what it defines.
+   *
+   *  That is what a run on an editor buffer does for the file the buffer holds, and the compiler
+   *  takes care of the rest: what an earlier run entered from a file with the same path is unlinked
+   *  (`PackageClassDenotation.unlinkFromFile`), same-name entries get replaced, and in interactive
+   *  mode a reference to a symbol that went away this way is redirected to its current namesake
+   *  (`Denotations.bringForward` via `currentSymbol`).
+   *
+   *  A definition gone from the file has no namesake to be redirected to, though: whatever referred
+   *  to it keeps its former denotation alive, as if the definition were still there. The caller is
+   *  told so, for it to start the compiler over instead. Definitions are compared by name (and by
+   *  owner), for the top-level classes and objects of the file and, for those the compiler had
+   *  completed - the only ones anything can refer to - their members, recursively.
+   */
+  def reloadSourcePathFile(path: Path): SourcePathReload =
+    sourcePathFiles.get(normalizedPath(path.toString)) match
+      case None => SourcePathReload.NotOnSourcePath
+      case Some(file) =>
+        if !file.exists then SourcePathReload.Missing
+        else
+          val content = new String(file.toByteArray, java.nio.charset.StandardCharsets.UTF_8).toCharArray
+          val uri = Paths.get(normalizedPath(file.path)).toUri
+          compilationUnits.get(uri) match
+            case Some(unit) if ju.Arrays.equals(unit.source.content(), content) =>
+              SourcePathReload.Unchanged
+            case _ =>
+              val before = definitionsFrom(file)(using currentCtx)
+              super.run(uri, sourceFileWithContent(file, content))
+              // Only what the run just entered counts: a top-level symbol of the file that the
+              // run left in place - the file lost its package clause, or moved to another
+              // package, or is empty at the moment - is one nothing in the file backs any more
+              val (after, survivors) = definitionsFrom(file, currentOnly = true)(using currentCtx)
+              val gone = before.diff(after)
+              userLogger.accept(
+                s"Reloaded $file (${content.length} chars): ${before.size} definitions before, " +
+                  s"${after.size} after, ${gone.size} gone, $survivors stale"
+              )
+              if gone.nonEmpty || survivors > 0 then SourcePathReload.DefinitionsRemoved
+              else SourcePathReload.Reloaded
+
+  /** The packages `file` contributes to, per the pre-computed package structure, as dotted names -
+   *  the empty package being "".
+   */
+  private def packagesOf(file: AbstractFile): List[String] =
+    val path = normalizedPath(file.path)
+    def walk(pkg: LogicalPackage, name: String): List[String] =
+      val here =
+        if pkg.sources.exists(f => normalizedPath(f.path) == path) then List(name) else Nil
+      here ++ pkg.packages.toList.flatMap { sub =>
+        walk(sub, if name.isEmpty then sub.name else s"$name.${sub.name}")
+      }
+    sourcePackage.value(using currentCtx).toList.flatMap(walk(_, ""))
+
+  private def definitionsFrom(file: AbstractFile)(using Context): Set[String] =
+    definitionsFrom(file, currentOnly = false)._1
+
+  /** Keys for what `file` defines, as far as the compiler knows: its top-level classes and objects,
+   *  and the members of those that are completed, recursively. Nothing gets forced here.
+   *
+   *  With `currentOnly`, only what the current run entered is keyed, and the top-level symbols of
+   *  the file that predate it are counted instead (second element). Checked before anything else
+   *  touches those symbols, as touching one brings it forward to the current run.
+   */
+  private def definitionsFrom(file: AbstractFile, currentOnly: Boolean)(using Context): (Set[String], Int) =
+    val path = normalizedPath(file.path)
+    val res = scala.collection.mutable.Set.empty[String]
+    var survivors = 0
+    def members(cls: ClassSymbol, prefix: String): Unit =
+      val denot = cls.denot
+      if denot.isCompleted then
+        for decl <- denot.unforcedDecls.toList if !decl.isConstructor do
+          val key = s"$prefix.${decl.name}${if decl.isType then "#" else ""}"
+          res += key
+          if decl.isClass then members(decl.asClass, key)
+    for
+      pkgName <- packagesOf(file)
+      pkg <- packageClass(pkgName).toList
+      sym <- pkg.unforcedDecls.toList
+      if sym.isClass
+      info = sym.asClass.compUnitInfo
+      if info != null && normalizedPath(info.associatedFile.path) == path
+    do
+      if currentOnly && sym.lastKnownDenotation.validFor.runId != ctx.runId then survivors += 1
+      else
+        val key = s"$pkgName.${sym.name}"
+        res += key
+        members(sym.asClass, key)
+    (res.toSet, survivors)
+
+  private def packageClass(dottedName: String)(using Context): Option[ClassSymbol] =
+    if dottedName.isEmpty then Some(defn.EmptyPackageClass)
+    else
+      val ref = staticRef(dottedName.toTermName, isPackage = true)
+      if ref.exists then Some(ref.symbol.moduleClass.asClass) else None
 
   private def inSource(source: SourceFile, diagnostic: Diagnostic): Boolean =
     !diagnostic.pos.exists || {

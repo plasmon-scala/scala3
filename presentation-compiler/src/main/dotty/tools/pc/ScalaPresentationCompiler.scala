@@ -334,6 +334,22 @@ class ScalaPresentationCompiler(
       new InferExpectedType(search, driver, params).infer().asJava
     }(using params.toQueryContext)
 
+  /** See [[CachingDriver.reloadSourcePathFile]]. Queued like any other request, so that it
+    * can't cross a query. Only worth calling on a loaded compiler: an unloaded one reads the file
+    * afresh anyway, when it gets created.
+    */
+  def reloadSourcePathFile(path: Path): CompletableFuture[SourcePathReload] =
+    compilerAccess.withNonInterruptableCompiler(
+      SourcePathReload.NotOnSourcePath,
+      EmptyCancelToken,
+      "reloadSourcePathFile",
+      path.toUri.toASCIIString
+    ) { access =>
+      access.compiler() match
+        case driver: CachingDriver => driver.reloadSourcePathFile(path)
+        case _ => SourcePathReload.NotOnSourcePath
+    }(emptyQueryContext)
+
   def shutdown(): Unit =
     compilerAccess.shutdown()
 
