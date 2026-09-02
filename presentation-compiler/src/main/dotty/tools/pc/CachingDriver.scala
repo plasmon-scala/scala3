@@ -15,10 +15,12 @@ import dotty.tools.dotc.core.Contexts.Context
 import dotty.tools.dotc.interactive.{
   CachedLogicalPackage,
   InteractiveDriver,
+  LogicalPackage,
   LogicalPackagesProvider,
   ParsedLogicalPackage
 }
 import dotty.tools.dotc.reporting.Diagnostic
+import scala.io.Codec
 import dotty.tools.dotc.util.SourceFile
 import dotty.tools.dotc.core.Comments
 import dotty.tools.dotc.core.Contexts.Context
@@ -174,6 +176,46 @@ class CachingDriver private (
       )
   }
 
+  /** The source path's own file objects, by absolute path.
+   *
+   *  A file open in the editor is usually on the source path too. The compiler enters symbols for
+   *  it from there, with a completer that late-compiles the file on disk - and completing one of
+   *  those once the editor's version of the file was entered (a stale companion module, say)
+   *  declares everything in the file a second time, as "already defined" errors. `Run.lateCompile`
+   *  skips the files of the run's own compilation units, comparing file objects by identity: so the
+   *  editor's version gets compiled as this very file object, with the editor's content.
+   */
+  private lazy val sourcePathFiles: Map[String, AbstractFile] =
+    sourcePackage.value(using currentCtx) match
+      case None => Map.empty
+      case Some(root) =>
+        def walk(pkg: LogicalPackage): Iterator[AbstractFile] =
+          pkg.sources.iterator ++ pkg.packages.iterator.flatMap(walk)
+        walk(root).map(file => (normalizedPath(file.path), file)).toMap
+
+  private def normalizedPath(path: String): String =
+    try Paths.get(path).toAbsolutePath.normalize.toString
+    catch
+      case _: java.nio.file.InvalidPathException => path
+
+  private def asSourcePathFile(source: SourceFile): SourceFile =
+    sourcePathFiles.get(normalizedPath(source.file.path)) match
+      case Some(file) if !(file eq source.file) =>
+        sourceFileWithContent(file, source.content())
+      case _ => source
+
+  /** A source file for `file`, but with `fileContent` rather than what is on disk. */
+  private def sourceFileWithContent(file: AbstractFile, fileContent: Array[Char]): SourceFile =
+    given ctx: Context = currentCtx
+    new SourceFile(file, ctx.settings.sourceroot.value, Codec(ctx.settings.encoding.value)):
+      override def content(): Array[Char] = fileContent
+
+  private def inSource(source: SourceFile, diagnostic: Diagnostic): Boolean =
+    !diagnostic.pos.exists || {
+      val file = diagnostic.pos.source.file
+      (file eq source.file) || normalizedPath(file.path) == normalizedPath(source.file.path)
+    }
+
   private def alreadyCompiled(uri: URI, content: Array[Char]): Boolean =
     compilationUnits.get(uri) match
       case Some(unit)
@@ -182,7 +224,8 @@ class CachingDriver private (
         true
       case _ => false
 
-  override def run(uri: URI, source: SourceFile): List[Diagnostic] =
+  override def run(uri: URI, source0: SourceFile): List[Diagnostic] =
+    val source = asSourcePathFile(source0)
     if (!alreadyCompiled(uri, source.content)) {
       val id =
         if (compilerAccess.beforeAccessOpt.nonEmpty || compilerAccess.afterAccessOpt.nonEmpty)
@@ -192,7 +235,11 @@ class CachingDriver private (
       for (f <- compilerAccess.beforeAccessOpt)
         f(id, "typechecking", uri.toASCIIString)
       try {
-        previousDiags = super.run(uri, source)
+        // Only what is located in the file itself: a source path file the run got to
+        // late-compile reports its own problems here too - from a genuine error in it, to the
+        // "already defined" ones the compiler raises when a generated file re-declares what
+        // the edited one already holds (a script and the wrapper the build tool derives from it)
+        previousDiags = super.run(uri, source).filter(inSource(source, _))
         emitDiagnostics.accept((uri, previousDiags))
       }
       finally {
