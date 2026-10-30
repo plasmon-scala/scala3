@@ -1,4 +1,4 @@
-//| mill-version: 1.1.3
+//| mill-version: 1.3.1
 //| bspScriptIgnore:
 //| - "bench/"
 //| - "bench-micro/"
@@ -33,9 +33,10 @@
 package build
 
 import mill.*
+import mill.api.BuildCtx
 import mill.javalib.publish.*
 import mill.scalalib.*
-import mill.util.VcsVersion
+import mill.util.Jvm
 
 object `presentation-compiler` extends SbtModule with PublishModule {
   def sources = Task.Sources(os.sub / "src/main")
@@ -58,11 +59,30 @@ object `presentation-compiler` extends SbtModule with PublishModule {
   )
 
   def artifactName = "scala3-presentation-compiler"
-  def publishVersion = Task {
-    val ver = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
-    val dirtyIdx = ver.indexOf("-DIRTY")
-    if (dirtyIdx < 0) ver
-    else ver.take(dirtyIdx) + "-SNAPSHOT"
+  // The version after 'v' if HEAD has a 'v*' tag, else the version following the latest 'v*' tag
+  // (3.8.4-1 -> 3.8.5-SNAPSHOT)
+  def publishVersion = Task.Input {
+    def describe(args: String*) =
+      os.proc("git", "describe", "--tags", "--match", "v*", args)
+        .call(cwd = BuildCtx.workspaceRoot, stderr = os.Pipe, check = false)
+    val exactMatch = describe("--exact-match", "HEAD")
+    if (exactMatch.exitCode == 0) exactMatch.out.trim().stripPrefix("v")
+    else {
+      val latest = describe("--abbrev=0", "HEAD")
+      if (latest.exitCode != 0)
+        Task.fail(s"No 'v*' tag found: ${latest.err.trim()}")
+      val latestVersion = latest.out.trim().stripPrefix("v")
+      latestVersion.split('.').take(3) match {
+        case Array(major, minor, patch) if patch.head.isDigit =>
+          s"$major.$minor.${patch.takeWhile(_.isDigit).toInt + 1}-SNAPSHOT"
+        case _ =>
+          Task.fail(s"Cannot compute the version following $latestVersion")
+      }
+    }
+  }
+  // Maven Central requires a javadoc JAR, but nobody reads it, and scaladoc is slow
+  def docJar = Task {
+    PathRef(Jvm.createJar(Task.dest / "empty-javadoc.jar", Nil))
   }
   def pomSettings = PomSettings(
     description = "scala3-presentation-compiler",
