@@ -14,6 +14,7 @@ import core.*
 import Contexts.*
 import Flags.*
 import Names.*
+import NameOps.*
 import Symbols.*
 import Types.*
 import interactive.*
@@ -98,6 +99,37 @@ object MetalsInteractive:
       case gtree: Select if isForComprehensionSyntheticName(gtree) => true
       case _ => false
 
+  /** The member an inline accessor stands for, or `sym` itself if it isn't one.
+   *
+   *  Private and qualified-private members referenced from an inline method are
+   *  replaced by synthetic accessors (`inline$x`, see `PrepareInlineable`) in the
+   *  typed trees. These don't exist in sources, so looking them up (to go to their
+   *  definition, or to show them in hovers) has to go through the accessed member.
+   *  Two flavours exist:
+   *  - `inline$x`, in the class of the accessed member `x`,
+   *  - `inline$x$i<n>`, taking the receiver (whose type has `x`) as first parameter.
+   */
+  def inlineAccessed(sym: Symbol)(using Context): Symbol =
+    if !sym.exists || !sym.isTerm || !sym.is(Synthetic) then sym
+    else
+      sym.name.toTermName.unexpandedName match
+        case NameKinds.InlineAccessorName(accessedName) =>
+          val (site, name) = accessedName match
+            case NameKinds.UniqueInlineName(underlying, _) =>
+              val receiverType = sym.info.stripPoly match
+                case mt: MethodType => mt.paramInfos.headOption.getOrElse(NoType)
+                case _ => NoType
+              (receiverType, underlying)
+            case other =>
+              (sym.owner.thisType, other)
+          val alternatives = site.member(name.toTermName).alternatives.map(_.symbol).filter(_.exists)
+          alternatives match
+            case Nil => sym
+            case single :: Nil => single
+            case several =>
+              several.find(_.signature == sym.signature).getOrElse(several.head)
+        case _ => sym
+
   def enclosingSymbols(
       path: List[Tree],
       pos: SourcePosition,
@@ -152,12 +184,22 @@ object MetalsInteractive:
   /** Returns the list of tuple enclosing symbol and the symbol's expression
    *  type if possible.
    */
-  @tailrec
   def enclosingSymbolsWithExpressionType(
       path: List[Tree],
       pos: SourcePosition,
       indexed: IndexedContext,
       skipCheckOnName: Boolean = false
+  ): List[(Symbol, Type, Option[String])] =
+    import indexed.ctx
+    enclosingSymbolsWithExpressionType0(path, pos, indexed, skipCheckOnName)
+      .map((sym, tpe, nameOpt) => (inlineAccessed(sym), tpe, nameOpt))
+
+  @tailrec
+  private def enclosingSymbolsWithExpressionType0(
+      path: List[Tree],
+      pos: SourcePosition,
+      indexed: IndexedContext,
+      skipCheckOnName: Boolean
   ): List[(Symbol, Type, Option[String])] =
     import indexed.ctx
     path match
@@ -318,7 +360,7 @@ object MetalsInteractive:
             )
           then List((head.symbol, head.typeOpt, None))
           else if head.symbol.is(Synthetic) then
-            enclosingSymbolsWithExpressionType(
+            enclosingSymbolsWithExpressionType0(
               tail,
               pos,
               indexed,
@@ -329,12 +371,12 @@ object MetalsInteractive:
            * https://github.com/scala/scala3/issues/15937
            */
           else if head.isInstanceOf[TypeTree] then
-            enclosingSymbolsWithExpressionType(tail, pos, indexed)
+            enclosingSymbolsWithExpressionType0(tail, pos, indexed, skipCheckOnName = false)
           else Nil
         else
           val recovered = recoverError(head, indexed)
           if recovered.isEmpty then
-            enclosingSymbolsWithExpressionType(
+            enclosingSymbolsWithExpressionType0(
               tail,
               pos,
               indexed,
@@ -344,7 +386,7 @@ object MetalsInteractive:
         end if
       case Nil => Nil
     end match
-  end enclosingSymbolsWithExpressionType
+  end enclosingSymbolsWithExpressionType0
 
   import dotty.tools.pc.utils.InteractiveEnrichments.*
 
