@@ -1,6 +1,7 @@
 package dotty.tools.pc
 
 import scala.meta.internal.pc.*
+import scala.meta.internal.metals.CtSym
 
 import java.net.URI
 import java.nio.file.Path
@@ -84,21 +85,35 @@ class CachingDriver private (
           new JavaPlatform(sourcePackage.value) {
             override def classPath(using Context): ClassPath = {
 
-              val modFiles = baseCtx0.settings.classpath.value
+              // The JDK classes, from its .jmod files (under "classes/" in each of them), or
+              // from the class signatures of its lib/ct.sym file (under one "<releases>/<module>/"
+              // directory per module and release set, see CtSym)
+              val jdkRoots: Seq[CachingDriver.JdkRoot] = baseCtx0.settings.classpath.value
                 .split(File.pathSeparator)
-                .filter(_.endsWith(".jmod"))
+                .toSeq
+                .filter(_.nonEmpty)
                 .map(Paths.get(_))
+                .flatMap { path =>
+                  if path.toString.endsWith(".jmod") then
+                    Seq(CachingDriver.JdkRoot(path, "classes", ".class"))
+                  else if CtSym.isCtSym(path) then
+                    CtSym.layout(path).prefixes.map(prefix =>
+                      CachingDriver.JdkRoot(path, prefix.stripSuffix("/"), CtSym.classSuffix)
+                    )
+                  else Nil
+                }
 
               lazy val modCp: ClassPath = new ClassPath {
                 import CachingDriver.fza
 
                 def cpIterator(): Iterator[Path] =
-                  modFiles.iterator
+                  jdkRoots.iterator.map(_.archive).distinct
 
-                private def packageDir(archive: AbstractFile, pkg: String): Option[AbstractFile] = {
-                  val dirName = ("classes" +: pkg.split('.').filter(_.nonEmpty)).mkString("/")
-                  Option(archive.lookupName(dirName, directory = true))
-                }
+                private def packageDirs(pkg: String): Iterator[(CachingDriver.JdkRoot, AbstractFile)] =
+                  jdkRoots.iterator.flatMap { root =>
+                    val dirName = (root.prefix +: pkg.split('.').filter(_.nonEmpty)).mkString("/")
+                    Option(fza(root.archive).lookupName(dirName, directory = true)).map((root, _))
+                  }
 
                 override def asURLs: Seq[URL] =
                   cpIterator()
@@ -107,33 +122,34 @@ class CachingDriver private (
 
                 override def findClassFile(className: String): Option[AbstractFile] = {
                   val (pkg, simpleName) = PackageNameUtils.separatePkgAndClassNames(className)
-                  cpIterator()
-                    .flatMap(f => packageDir(fza(f), pkg).iterator)
-                    .flatMap(dir => Option(dir.lookupName(simpleName + ".class", directory = false)).iterator)
+                  packageDirs(pkg)
+                    .flatMap { (root, dir) =>
+                      Option(dir.lookupName(simpleName + root.classSuffix, directory = false)).iterator
+                    }
                     .take(1)
                     .toList
                     .headOption
                 }
 
                 override def hasPackage(pkg: String): Boolean =
-                  cpIterator().exists(f => packageDir(fza(f), pkg).nonEmpty)
+                  packageDirs(pkg).hasNext
 
                 override def packages(inPackage: String): Iterable[String] = {
                   val prefix = PackageNameUtils.packagePrefix(inPackage)
-                  cpIterator()
-                    .flatMap(f => packageDir(fza(f), inPackage).iterator)
-                    .flatMap(_.iterator)
+                  packageDirs(inPackage)
+                    .flatMap(_._2.iterator)
                     .filter(_.isDirectory)
                     .map(prefix + _.name)
                     .toVector
                     .distinct
                 }
                 override def classes(inPackage: String): Iterable[BinaryFileEntry] =
-                  cpIterator()
-                    .flatMap(f => packageDir(fza(f), inPackage).iterator)
-                    .flatMap(_.iterator)
-                    .filter(!_.isDirectory)
-                    .filter(_.name.endsWith(".class"))
+                  packageDirs(inPackage)
+                    .flatMap { (root, dir) =>
+                      dir.iterator
+                        .filter(!_.isDirectory)
+                        .filter(_.name.endsWith(root.classSuffix))
+                    }
                     .map(BinaryFileEntry(_))
                     .toVector
                     .distinct
@@ -144,6 +160,17 @@ class CachingDriver private (
                   Nil
               }
 
+              def normalized(path: Path): Path = path.toAbsolutePath.normalize
+              val jdkArchives = jdkRoots.map(root => normalized(root.archive)).toSet
+              // The .jmod / ct.sym files themselves, read as plain archives: their classes
+              // are under "classes/…" or "MNO/java.base/…", which would make packages of these
+              def isJdkArchive(cp: ClassPath): Boolean =
+                jdkArchives.nonEmpty && (cp.asURLs match {
+                  case Seq(url) if url.getProtocol == "file" =>
+                    scala.util.Try(normalized(Paths.get(url.toURI))).toOption.exists(jdkArchives)
+                  case _ => false
+                })
+
               def process(cp: ClassPath): Option[ClassPath] =
                 cp match {
                   case agg: AggregateClassPath =>
@@ -151,6 +178,8 @@ class CachingDriver private (
                     if (res.isEmpty) None
                     else Some(AggregateClassPath(res))
                   case _: dotty.tools.dotc.classpath.JrtClassPath =>
+                    None
+                  case other if isJdkArchive(other) =>
                     None
                   case other =>
                     Some(other)
@@ -372,6 +401,13 @@ object CachingDriver:
       case SourcePathMode.MBT =>
         Some(ParsedLogicalPackage.fromMbtIndex(semanticdbFileManager.listAllPackages()))
     new CachingDriver(settings, CachedLogicalPackage(sourcePackagesExtractor), compilerAccess, userLogger, emitDiagnostics)
+
+  /** A directory JDK classes are read from
+   *
+   *  @param prefix the archive directory, like `classes` or `MNO/java.base`
+   *  @param classSuffix `.class`, or `.sig` for ct.sym
+   */
+  final case class JdkRoot(archive: Path, prefix: String, classSuffix: String)
 
   private val fzaCache = new ConcurrentHashMap[Path, AbstractFile]
   private def fza(path: Path): AbstractFile = {
