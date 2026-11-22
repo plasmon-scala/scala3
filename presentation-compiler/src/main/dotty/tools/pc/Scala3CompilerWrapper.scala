@@ -18,8 +18,6 @@ class Scala3CompilerWrapper(driver: CachingDriver)
     new ReporterAccess[StoreReporter]:
       def reporter = driver.currentCtx.reporter.asInstanceOf[StoreReporter]
 
-  override def askShutdown(): Unit = ()
-
   override def isAlive(): Boolean = false
 
   override def stop(): Unit = {}

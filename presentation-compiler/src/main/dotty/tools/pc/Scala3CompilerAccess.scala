@@ -7,6 +7,7 @@ import scala.meta.internal.pc.CompilerAccess
 import scala.meta.pc.PresentationCompilerConfig
 
 import dotty.tools.dotc.reporting.StoreReporter
+import org.slf4j.LoggerFactory
 
 class Scala3CompilerAccess(
     config: PresentationCompilerConfig,
@@ -15,6 +16,7 @@ class Scala3CompilerAccess(
     userLogger: java.util.function.Consumer[String]
 )(using ec: ExecutionContextExecutor)
     extends CompilerAccess[StoreReporter, CachingDriver](
+      LoggerFactory.getLogger(classOf[Scala3CompilerAccess]),
       config,
       sh,
       newCompiler,

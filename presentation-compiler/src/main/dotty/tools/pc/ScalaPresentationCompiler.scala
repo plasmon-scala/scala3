@@ -392,9 +392,9 @@ class ScalaPresentationCompiler(
       provider.textDocument(filename, code)
     }(using virtualFile.toQueryContext)
 
-  def supportsBatchSemanticdbTextDocuments(): Boolean = true
+  override def supportsBatchSemanticdbTextDocuments(): Boolean = true
 
-  def batchSemanticdbTextDocuments(
+  override def batchSemanticdbTextDocuments(
       params: ju.List[VirtualFileParams],
       timeout: Duration
   ): CompletableFuture[Array[Byte]] =
