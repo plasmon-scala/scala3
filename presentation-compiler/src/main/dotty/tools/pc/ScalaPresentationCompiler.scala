@@ -52,11 +52,12 @@ import l.Hover
 import scala.meta.internal.pc.ScalaHover
 import scala.meta.internal.pc.HoverMarkup
 import dotty.tools.dotc.reporting.Diagnostic
+import dotty.tools.dotc.util.SourceFile
 
 class ScalaPresentationCompiler(
     javaHome: Path,
     userLoggerSupplier: java.util.function.Supplier[java.util.function.Consumer[String]],
-    emitDiagnostics: java.util.function.Consumer[(URI, Seq[Diagnostic])],
+    emitDiagnostics: java.util.function.Consumer[(URI, SourceFile, Seq[Diagnostic])],
     var module: GlobalSymbolIndex.Module,
     var buildTargetName: Option[String] = None,
     var classpath: Seq[Path] = Nil,

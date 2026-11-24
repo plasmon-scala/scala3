@@ -70,7 +70,7 @@ class CachingDriver private (
     sourcePackage: CachedLogicalPackage,
     compilerAccess: Scala3CompilerAccess,
     userLogger: Consumer[String],
-    emitDiagnostics: Consumer[(URI, Seq[Diagnostic])]
+    emitDiagnostics: Consumer[(URI, SourceFile, Seq[Diagnostic])]
 ) extends InteractiveDriver(settings, sourcePackage):
 
   private var lastCompiledURI: URI = uninitialized
@@ -338,7 +338,9 @@ class CachingDriver private (
         // "already defined" ones the compiler raises when a generated file re-declares what
         // the edited one already holds (a script and the wrapper the build tool derives from it)
         previousDiags = super.run(uri, source).filter(inSource(source, _))
-        emitDiagnostics.accept((uri, previousDiags))
+        // the source goes along, so that users can tell what code the diagnostics were computed
+        // for, even when there are none
+        emitDiagnostics.accept((uri, source, previousDiags))
       }
       finally {
         for (f <- compilerAccess.afterAccessOpt)
@@ -361,7 +363,7 @@ object CachingDriver:
       sourcePathMode: SourcePathMode,
       compilerAccess: Scala3CompilerAccess,
       userLogger: Consumer[String],
-      emitDiagnostics: Consumer[(URI, Seq[Diagnostic])]
+      emitDiagnostics: Consumer[(URI, SourceFile, Seq[Diagnostic])]
   ): CachingDriver =
     def sourcePackagesExtractor(using Context) = sourcePathMode match
       case SourcePathMode.DISABLED => None
